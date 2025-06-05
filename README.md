@@ -19,23 +19,25 @@ publicly accessible source code
 project description that also covers stack architecture
 optional: link to live deployed demo
 
-deadline june2
+## Steps
+
+Run anvil
 
 
-
-
-then run 
+Then run 
 
 ```
 forge script script/Deploy.s.sol:DeployVeniceAutomation   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
 ```
 
-test 
+## Test 
 
-cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3   "performUpkeep(bytes)" 0x   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --rpc-url http://127.0.0.1:8545   --chain-id 31337   --gas-limit 300000
+```cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3   "performUpkeep(bytes)" 0x   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --rpc-url http://127.0.0.1:8545   --chain-id 31337   --gas-limit 300000
+```
 
 test listener
 
-cd frontend
+```cd frontend
 npx ts-node --project tsconfig.backend.json backend/veniceListener.ts# chainlink-hackathon
-# chainlink-hackathon
+```
+
