@@ -1,0 +1,44 @@
+[
+  {
+    "id": 1749243122224,
+    "timestamp": 1749243121,
+    "prompt": "Act as a crypto strategist. Analyze current risk factors in the market and recommend: buy, sell, hold, or wait. Justify your decision.",
+    "blockNumber": 17,
+    "status": "completed",
+    "response": "<think>\nOkay, the user wants me to act as a crypto strategist and analyze current risk factors. Let me start by recalling the current state of the crypto market. First, I need to consider macroeconomic factors. Interest rates are still high in many c...",
+    "createdAt": "2025-06-06T20:52:02.224Z",
+    "processingTime": 5053,
+    "decisionTx": "0x29542705c9656c0d4a45053a37534b121c2e45b55b47805865659950bea04a4c"
+  },
+  {
+    "id": 1749243128044,
+    "timestamp": 1749243121,
+    "prompt": "Act as a crypto strategist. Analyze current risk factors in the market and recommend: buy, sell, hold, or wait. Justify your decision.",
+    "blockNumber": 17,
+    "status": "completed",
+    "response": "<think>\nOkay, the user wants me to act as a crypto strategist and analyze current risk factors. Let me start by recalling the latest market trends. First, I need to consider the overall market sentiment. Bitcoin and Ethereum have been volatile lately...",
+    "createdAt": "2025-06-06T20:52:08.044Z",
+    "processingTime": 4809,
+    "decisionTx": "0x8333138c79ab12a0fdc03177947aa4136774e4e3e0be18f628bd27bee5793622"
+  },
+  {
+    "id": 1749243186093,
+    "timestamp": 1749243185,
+    "prompt": "Act as a crypto strategist. Analyze current risk factors in the market and recommend: buy, sell, hold, or wait. Justify your decision.",
+    "blockNumber": 21,
+    "status": "completed",
+    "response": "<think>\nOkay, the user wants me to act as a crypto strategist and analyze current risk factors. Let me start by recalling the current state of the cryptocurrency market. First, I need to consider macroeconomic factors. Interest rates are still high i...",
+    "createdAt": "2025-06-06T20:53:06.094Z",
+    "processingTime": -5952,
+    "decisionTx": "0xa10bce67fef234121fb1ab364ca9623a0744c33b0c6923e17c4680f2b3957dac"
+  },
+  {
+    "id": 1749243181332,
+    "timestamp": 1749243185,
+    "prompt": "Act as a crypto strategist. Analyze current risk factors in the market and recommend: buy, sell, hold, or wait. Justify your decision.",
+    "blockNumber": 21,
+    "status": "processing",
+    "response": "",
+    "createdAt": "2025-06-06T20:53:01.332Z"
+  }
+]

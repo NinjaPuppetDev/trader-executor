@@ -1,0 +1,13 @@
+[
+  {
+    "id": "1749244369903",
+    "timestamp": "1749244369",
+    "prompt": "Act as a crypto strategist. Analyze current risk factors in the market and recommend: buy, sell, hold, or wait. Justify your decision.",
+    "decision": "<think>\nOkay, the user wants me to act as a crypto strategist and analyze current risk factors. Let me start by recalling the key factors affecting the crypto market. First, the overall market sentiment is crucial. I remember that in the past few mon...",
+    "decisionLength": 253,
+    "status": "completed",
+    "createdAt": "2025-06-06T21:12:49.904Z",
+    "txHash": "0x2749dc2755284a5d43ac9a48b6a8dd13f95ec1df90388ac37735e04af5cff6a6",
+    "blockNumber": 35
+  }
+]

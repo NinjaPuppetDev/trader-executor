@@ -62,6 +62,25 @@
   },
   {
     "type": "function",
+    "name": "getPromptByIndex",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "interval",
     "inputs": [],
     "outputs": [
@@ -171,13 +190,6 @@
     "stateMutability": "nonpayable"
   },
   {
-    "type": "function",
-    "name": "withdrawETH",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
     "type": "event",
     "name": "DecisionReceived",
     "inputs": [
@@ -197,7 +209,7 @@
       {
         "name": "id",
         "type": "uint256",
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256"
       },
       {

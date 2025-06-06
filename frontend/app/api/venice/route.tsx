@@ -9,7 +9,8 @@ export async function POST(req: Request) {
             return new Response("Invalid prompt", { status: 400 });
         }
 
-        const signal = await fetchTradingSignal(prompt);
+        const apiKey = process.env.VENICE_API_KEY;
+        const signal = await fetchTradingSignal(prompt, apiKey!);
         return Response.json({ signal });
 
     } catch (err: any) {

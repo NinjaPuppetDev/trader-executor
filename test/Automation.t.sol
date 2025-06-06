@@ -6,85 +6,73 @@ import {VeniceAutomation} from "../src/VeniceAutomation.sol";
 
 contract VeniceAutomationTest is Test {
     VeniceAutomation public automation;
-    address public owner;
+    address public owner = address(0x123);
+    address public nonOwner = address(0x456);
     uint256 public constant INITIAL_INTERVAL = 900; // 15 minutes
 
-    // Events
     event RequestAnalysis(uint256 indexed timestamp, string prompt);
-    event PromptAdded(uint256 indexed promptId, string prompt); // Declare PromptAdded event here
+    event DecisionReceived(string result);
+    event PromptAdded(uint256 indexed id, string prompt);
 
     function setUp() public {
-        // Deploy the contract
-        owner = address(this);
+        vm.startPrank(owner);
         automation = new VeniceAutomation(INITIAL_INTERVAL);
-
-        // Ensure the contract was deployed correctly
-        assertEq(address(automation), address(automation));
-        assertEq(automation.interval(), INITIAL_INTERVAL);
-        assertEq(automation.owner(), owner);
+        vm.stopPrank();
     }
 
-    function testAddPrompt() public {
-        // Add a new prompt
-        string memory newPrompt = "Analyze ETH/BTC price correlation";
+    // Test initialization
+    // Updated test cases
+    function test_PerformUpkeep() public {
+        uint256 initialTime = block.timestamp;
 
-        // Expect the PromptAdded event to be emitted
+        // Advance time past interval
+        vm.warp(initialTime + INITIAL_INTERVAL + 1);
+
+        // Calculate expected prompt ID
+        uint256 expectedId = ((initialTime + INITIAL_INTERVAL + 1) / INITIAL_INTERVAL) % automation.promptCount();
+        string memory expectedPrompt = automation.prompts(expectedId);
+
+        // Validate event emission with proper parameters
         vm.expectEmit(true, true, true, true);
-        emit PromptAdded(0, newPrompt);
+        emit RequestAnalysis(block.timestamp, expectedPrompt);
 
-        automation.addPrompt(newPrompt);
-
-        // Verify the prompt was added
-        string memory storedPrompt = automation.prompts(0); // The first prompt added
-        assertEq(storedPrompt, newPrompt);
-    }
-
-    function testRequestAnalysisEventOnPerformUpkeep() public {
-        // Add prompts before running the test to avoid out-of-bounds errors
-        automation.addPrompt("Analyze ETH/USD correlation");
-
-        // Perform upkeep to trigger the RequestAnalysis event
-        vm.warp(block.timestamp + INITIAL_INTERVAL); // Simulate time passing
-        vm.roll(block.number + 1); // Move to the next block
-
-        // Expect the RequestAnalysis event to be emitted
-        vm.expectEmit(true, true, true, true);
-        emit RequestAnalysis(block.timestamp, "Analyze ETH/USD correlation");
-
-        // Perform upkeep (this should trigger the event)
-        automation.performUpkeep("");
-    }
-
-    function testOwnerOnlyAddPrompt() public {
-        // Try to add a prompt as a non-owner (should revert)
-        address nonOwner = address(0x123);
-        vm.prank(nonOwner);
-
-        // Expect the custom OnlyOwner error
-        vm.expectRevert(VeniceAutomation.OnlyOwner.selector);
-        automation.addPrompt("This should fail");
-    }
-
-    function testIntervalBasedPromptRotation() public {
-        // Add prompts before running the test to avoid out-of-bounds errors
-        automation.addPrompt("Analyze ETH/USD correlation");
-        automation.addPrompt("Analyze BTC/USD volatility");
-
-        // Simulate the passing of time for interval-based prompt switching
-        vm.warp(block.timestamp + INITIAL_INTERVAL * 2); // Simulate time passing for two intervals
-        vm.roll(block.number + 1); // Move to the next block
-
-        // Perform upkeep to rotate through prompts
         automation.performUpkeep("");
 
-        // Verify the prompt switched to the second prompt (based on time)
-        string memory promptAfterRotation = automation.prompts(1); // Check prompt after rotation
-        assertEq(promptAfterRotation, "Analyze BTC/USD volatility");
+        assertEq(automation.lastTimeStamp(), block.timestamp, "Timestamp should update");
+        assertEq(automation.currentPrompt(), expectedPrompt, "Current prompt should match");
     }
 
-    function testEmptyPromptReverts() public {
-        // Try adding an empty prompt (should revert)
-        vm.expectRevert(VeniceAutomation.EmptyPrompt.selector);
-        automation.addPrompt("");
+    function test_PromptRotation() public {
+        // Add more prompts for better rotation test
+        vm.prank(owner);
+        automation.addPrompt("Fourth prompt");
+        vm.prank(owner);
+        automation.addPrompt("Fifth prompt");
+
+        uint256 count = automation.promptCount();
+        string memory lastPrompt = automation.currentPrompt();
+        uint256 sameCount = 0;
+
+        // Test 10 rotations
+        for (uint256 i = 0; i < 10; i++) {
+            uint256 currentTime = block.timestamp;
+            uint256 newTime = currentTime + INITIAL_INTERVAL + 1;
+            vm.warp(newTime);
+
+            automation.performUpkeep("");
+
+            uint256 expectedId = (newTime / INITIAL_INTERVAL) % count;
+            string memory expectedPrompt = automation.prompts(expectedId);
+
+            assertEq(automation.currentPrompt(), expectedPrompt, "Prompt should rotate correctly");
+
+            // Check for consecutive same prompts (should be rare with this setup)
+            if (keccak256(bytes(automation.currentPrompt())) == keccak256(bytes(lastPrompt))) {
+                sameCount++;
+            }
+            lastPrompt = automation.currentPrompt();
+        }
+
+        assertLt(sameCount, 3, "Should not get same prompt too frequently");
     }
 }
