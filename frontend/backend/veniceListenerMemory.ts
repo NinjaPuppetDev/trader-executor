@@ -4,7 +4,7 @@ import contractAbi from "../app/abis/VeniceAutomation.json";
 import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
-import { lock, unlock } from 'proper-lockfile';
+import { lock } from 'proper-lockfile';
 
 dotenv.config();
 

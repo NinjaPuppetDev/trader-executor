@@ -34,7 +34,9 @@ contract VeniceAutomation is KeeperCompatibleInterface {
 
         // Updated prompt
         _addPrompt(
-            "Act as a crypto strategist. Analyze current risk factors in the market and recommend: buy, sell, hold, or wait. Justify your decision."
+            "Act as a crypto strategist. Analyze current market risk factors. "
+            "Output ONLY in this JSON format: {\"decision\":\"buy|sell|hold|wait\"}. "
+            "Do not include any other text, explanations, or formatting."
         );
     }
 

@@ -1,5 +1,7 @@
-import AioracleFrontend from "./aioraclefrontend";
+import AioracleFrontend from "./AiOracleFrontend";
+import TraderDashboard from "./TraderFrontend";
 
 export default function Home() {
-  return <AioracleFrontend />;
+  return <><AioracleFrontend /><TraderDashboard /></>
+    ;
 }

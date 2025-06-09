@@ -1,6 +1,6 @@
 import "./globals.css";
 import { ReactNode } from "react";
-import AIOracleInterface from "../app/aioraclefrontend"; // adjust path if needed
+import AIOracleInterface from "./AiOracleFrontend"; // adjust path if needed
 
 export const metadata = {
   title: "AI Prompt Oracle",

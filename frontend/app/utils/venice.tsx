@@ -1,7 +1,5 @@
 // utils/venice.ts
 
-const VENICE_API_KEY = process.env.VENICE_API_KEY!;
-
 export async function fetchTradingSignal(prompt: string, apiKey: string): Promise<string> {
   if (!apiKey) {
     throw new Error("VENICE_API_KEY not set in .env");
@@ -29,7 +27,7 @@ export async function fetchTradingSignal(prompt: string, apiKey: string): Promis
     const data = await response.json();
     const content = data.choices[0].message.content;
 
-    return content.length > 250 ? content.slice(0, 250) + "..." : content;
+    return content;
 
   } catch (err: any) {
     console.error("❌ Venice fetch error:", err.message || err);
