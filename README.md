@@ -21,38 +21,46 @@ optional: link to live deployed demo
 
 ## Steps
 
-Run anvil
+```
+anvil
+```
 
 
 ## DeployVeniceTriggerAutomation
 
-```forge script script/Deploy.s.sol:DeployVeniceAutomation   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
+```
+forge script script/Deploy.s.sol:DeployVeniceAutomation   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
 ```
 
 ## DeployTrader
 
-```forge create src/MockTrader.sol:MockTrader   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
+```
+forge create src/MockTrader.sol:MockTrader   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
 ```
 
 ## run listener
 
-```cd frontend
+```
+cd frontend
 npx ts-node --project tsconfig.backend.json backend/veniceListenerMemory.ts
 ```
 ## run trader
 
-```cd frontend
+```
+cd frontend
 npx ts-node --project tsconfig.backend.json backend/tradingEngine.ts
 ```
 
 ## Test Upkeep
 
-```cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3   "performUpkeep(bytes)" 0x   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --rpc-url http://127.0.0.1:8545   --chain-id 31337   --gas-limit 300000
+```
+cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3   "performUpkeep(bytes)" 0x   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --rpc-url http://127.0.0.1:8545   --chain-id 31337   --gas-limit 300000
 ```
 
 ## Deploy Frontend
 
-``` cd frontend
+```
+cd frontend
 npm run dev
 ```
 
