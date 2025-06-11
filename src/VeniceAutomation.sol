@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {KeeperCompatibleInterface} from "@chainlink/interfaces/automation/KeeperCompatibleInterface.sol";
+import {KeeperCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/KeeperCompatible.sol";
 
 contract VeniceAutomation is KeeperCompatibleInterface {
     // State variables
