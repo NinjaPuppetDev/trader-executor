@@ -22,60 +22,41 @@ contract MagicTraderSender is OwnerIsCreator, ReentrancyGuard {
     uint256 public constant GAS_LIMIT = 500_000;
 
     IRouterClient public router;
-    IERC20 public assetToken;
     IERC20 public linkToken;
     uint64 public destChain;
     address public receiver;
 
     event TradeSent(Action action, address executor, bytes32 msgId);
 
-    constructor(address _router, address _assetToken, address _linkToken, uint64 _destChain, address _receiver) {
+    constructor(address _router, address _linkToken, uint64 _destChain, address _receiver) {
         router = IRouterClient(_router);
-        assetToken = IERC20(_assetToken);
         linkToken = IERC20(_linkToken);
         destChain = _destChain;
         receiver = _receiver;
     }
 
     function executeTrade(Action action) external nonReentrant onlyOwner returns (bytes32) {
-        require(action == Action.Buy || action == Action.Sell, "Invalid action for sending");
+        require(action == Action.Buy || action == Action.Sell, "Invalid action");
 
-        assetToken.safeTransferFrom(msg.sender, address(this), TRADING_AMOUNT);
-        Client.EVM2AnyMessage memory ccipMsg = _buildMessage(action);
+        Client.EVM2AnyMessage memory ccipMsg = Client.EVM2AnyMessage({
+            receiver: abi.encode(receiver),
+            data: abi.encode(action, msg.sender, TRADING_AMOUNT),
+            tokenAmounts: new Client.EVMTokenAmount[](0), // Empty token array
+            feeToken: address(linkToken),
+            extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({gasLimit: GAS_LIMIT}))
+        });
 
         uint256 fee = router.getFee(destChain, ccipMsg);
         require(linkToken.balanceOf(address(this)) >= fee, "Insufficient LINK");
 
-        _approveToken(linkToken, address(router), fee);
-        _approveToken(assetToken, address(router), TRADING_AMOUNT);
-
+        linkToken.safeIncreaseAllowance(address(router), fee);
         bytes32 msgId = router.ccipSend(destChain, ccipMsg);
+
         emit TradeSent(action, msg.sender, msgId);
         return msgId;
     }
 
-    function _approveToken(IERC20 token, address spender, uint256 amount) private {
-        uint256 currentAllowance = token.allowance(address(this), spender);
-        if (currentAllowance > 0) {
-            token.safeDecreaseAllowance(spender, currentAllowance);
-        }
-        token.safeIncreaseAllowance(spender, amount);
-    }
-
-    function _buildMessage(Action action) internal view returns (Client.EVM2AnyMessage memory) {
-        Client.EVMTokenAmount[] memory amounts = new Client.EVMTokenAmount[](1);
-        amounts[0] = Client.EVMTokenAmount({token: address(assetToken), amount: TRADING_AMOUNT});
-
-        return Client.EVM2AnyMessage({
-            receiver: abi.encode(receiver),
-            data: abi.encode(action, msg.sender),
-            tokenAmounts: amounts,
-            feeToken: address(linkToken),
-            extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({gasLimit: GAS_LIMIT}))
-        });
-    }
-
-    function withdrawToken(address token, uint256 amount) external onlyOwner {
-        IERC20(token).safeTransfer(owner(), amount);
+    function withdrawLink(uint256 amount) external onlyOwner {
+        linkToken.safeTransfer(owner(), amount);
     }
 }

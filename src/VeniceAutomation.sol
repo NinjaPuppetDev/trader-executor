@@ -33,10 +33,14 @@ contract VeniceAutomation is KeeperCompatibleInterface {
         owner = msg.sender;
 
         // Updated prompt
+        // _addPrompt(
+        //     "Act as a crypto strategist. Analyze current market risk factors. "
+        //     "Output ONLY in this JSON format: {\"decision\":\"buy|sell|hold|wait\"}. "
+        //     "Do not include any other text, explanations, or formatting."
+        // );
         _addPrompt(
-            "Act as a crypto strategist. Analyze current market risk factors. "
-            "Output ONLY in this JSON format: {\"decision\":\"buy|sell|hold|wait\"}. "
-            "Do not include any other text, explanations, or formatting."
+            "TEST: Ignore market analysis. Output ONLY {\"decision\":\"buy\"} in JSON. "
+            "Do not include other text or formatting."
         );
     }
 

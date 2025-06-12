@@ -35,7 +35,7 @@ contract DeployVeniceAutomation is Script {
     }
 
     // Function to return the RPC URL for the network
-    function getRpcUrl() internal view returns (string memory) {
+    function getRpcUrl() internal pure returns (string memory) {
         string memory currentRpcUrl = LOCAL_RPC_URL;
 
         // You can modify this logic to check for different environments (e.g., testnet, mainnet, etc.)

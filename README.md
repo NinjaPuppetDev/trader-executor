@@ -32,11 +32,6 @@ anvil
 forge script script/Deploy.s.sol:DeployVeniceAutomation   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
 ```
 
-## Deploy Mock Trader
-
-```
-forge create src/MockTrader.sol:MockTrader   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
-```
 
 ## Run Listener
 
@@ -44,17 +39,32 @@ forge create src/MockTrader.sol:MockTrader   --rpc-url http://127.0.0.1:8545   -
 cd frontend
 npx ts-node --project tsconfig.backend.json backend/veniceListenerMemory.ts
 ```
-## Run Trader
 
-```
-cd frontend
-npx ts-node --project tsconfig.backend.json backend/tradingEngine.ts
-```
 
 ## Test Upkeep
 
 ```
 cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3   "performUpkeep(bytes)" 0x   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --rpc-url http://127.0.0.1:8545   --chain-id 31337   --gas-limit 300000
+```
+
+
+## Deploy Receiver Base Sepolia 
+
+```
+forge script script/DeployReceiverBaseSepolia.s.sol:DeployBaseSepolia   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
+```
+
+## Deploy Sender Eth Sepolia
+
+```
+forge script script/DeploySenderEthSepolia.s.sol:DeploySepolia   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
+```
+
+## Run Trader
+
+```
+cd frontend
+npx ts-node --project tsconfig.backend.json backend/ccipTraderSender.ts
 ```
 
 ## Deploy Frontend
@@ -63,21 +73,4 @@ cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3   "performUpkeep(bytes)" 0x
 cd frontend
 npm run dev
 ```
-
-## CCIP Trader (Run this one instead of MockTrader)
-
-## Deploy Mocks
-
-```
-forge script script/MockDeployer.s.sol:DeployMocks   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
-```
-
-
-## Deploy CCIP 
-
-```
-forge script script/DeployCCIP.s.sol:DeployContracts   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
-```
-
-
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {MagicTraderSender} from "../src/MagicTraderSender.sol";
@@ -15,68 +15,87 @@ contract MagicTraderTest is Test {
     MagicTraderReceiver receiver;
     IRouterClient router;
     MockERC20 assetToken;
-    LinkToken linkToken; // Changed type to LinkToken
+    LinkToken linkToken;
 
     address owner;
-    uint256 tradingAmount;
-    uint64 destChain; // Will get from simulator
+    uint256 constant TRADING_AMOUNT = 100 ether;
+    uint64 destChain;
 
     function setUp() public {
         owner = address(1);
+        vm.deal(owner, 10 ether);
+        vm.startPrank(owner);
 
         // Use Chainlink Local Simulator
         CCIPLocalSimulator simulator = new CCIPLocalSimulator();
-        (uint64 chainSelector, IRouterClient routerAddress,,, LinkToken linkTokenAddress,,) = simulator.configuration();
-
-        router = routerAddress;
-        linkToken = linkTokenAddress;
-        destChain = chainSelector;
+        (destChain, router,,, linkToken,,) = simulator.configuration();
 
         // Deploy token
         assetToken = new MockERC20("Test Asset", "ASSET");
 
-        // Transfer token ownership to our test owner
-        assetToken.transferOwnership(owner);
-
-        // Register token with simulator
-        vm.prank(owner);
-        simulator.supportNewTokenViaOwner(address(assetToken));
-
         // Deploy contracts
-        vm.startPrank(owner);
         receiver = new MagicTraderReceiver(address(router), address(assetToken));
-        sender = new MagicTraderSender(
-            address(router), address(assetToken), address(linkToken), destChain, address(receiver)
-        );
-        vm.stopPrank();
-
-        // Get trading amount
-        tradingAmount = sender.TRADING_AMOUNT();
+        sender = new MagicTraderSender(address(router), address(linkToken), destChain, address(receiver));
 
         // Fund accounts
-        vm.startPrank(owner);
-        assetToken.mint(owner, 1000 ether);
+        // 1. Fund receiver with tokens
+        assetToken.mint(address(receiver), 1000 ether);
 
-        // Use simulator's faucet for LINK tokens
+        // 2. Fund sender with LINK
         simulator.requestLinkFromFaucet(address(sender), 10 ether);
+
         vm.stopPrank();
     }
 
     function testExecuteTrade() public {
-        vm.startPrank(owner);
-        assetToken.approve(address(sender), tradingAmount);
+        // Set initial balances
+        uint256 initialReceiverBalance = assetToken.balanceOf(address(receiver));
         uint256 initialOwnerBalance = assetToken.balanceOf(owner);
-        vm.stopPrank();
 
         // Execute trade as owner
         vm.prank(owner);
         MagicTraderSender.Action action = MagicTraderSender.Action.Buy;
-        sender.executeTrade(action); // This already triggers the CCIP transfer
+        sender.executeTrade(action);
 
-        // The router has already delivered the message during ccipSend
-        // So we DON'T need to simulate it again
+        // Validate token transfer
+        assertEq(assetToken.balanceOf(owner), initialOwnerBalance + TRADING_AMOUNT, "Owner should receive tokens");
 
-        // Check final balance
-        assertEq(assetToken.balanceOf(owner), initialOwnerBalance, "Owner should have tokens returned");
+        assertEq(
+            assetToken.balanceOf(address(receiver)),
+            initialReceiverBalance - TRADING_AMOUNT,
+            "Receiver should send tokens"
+        );
+    }
+
+    function testInvalidActionReverts() public {
+        vm.prank(owner);
+        vm.expectRevert("Invalid action");
+        sender.executeTrade(MagicTraderSender.Action.Hold);
+    }
+
+    function testInsufficientLinkReverts() public {
+        // Create a mock fee scenario for this specific test
+        uint256 mockFee = 1 ether;
+
+        // Mock the router's getFee function to return a non-zero fee
+        vm.mockCall(address(router), abi.encodeWithSelector(IRouterClient.getFee.selector), abi.encode(mockFee));
+
+        // Withdraw all LINK from sender
+        vm.prank(owner);
+        sender.withdrawLink(10 ether);
+
+        // Verify sender has 0 LINK
+        assertEq(linkToken.balanceOf(address(sender)), 0, "Sender should have 0 LINK");
+
+        // Execute trade should revert
+        vm.prank(owner);
+        vm.expectRevert("Insufficient LINK");
+        sender.executeTrade(MagicTraderSender.Action.Buy);
+    }
+
+    function testOnlyOwnerCanExecute() public {
+        vm.prank(address(0x123)); // Non-owner
+        vm.expectRevert();
+        sender.executeTrade(MagicTraderSender.Action.Buy);
     }
 }

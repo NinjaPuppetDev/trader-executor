@@ -24,10 +24,10 @@ interface TradingDecision {
 // Configuration
 const CONFIG = {
     rpcUrl: process.env.RPC_URL || 'http://localhost:8545',
-    contractAddress: process.env.SENDER_CONTRACT_ADDRESS || '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+    contractAddress: process.env.SENDER_CONTRACT_ADDRESS || '0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9',
     privateKey: process.env.PRIVATE_KEY || '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-    assetTokenAddress: process.env.ASSET_TOKEN_ADDRESS || '0xYourAssetToken',
-    linkTokenAddress: process.env.LINK_TOKEN_ADDRESS || '0xYourLinkToken',
+    assetTokenAddress: process.env.ASSET_TOKEN_ADDRESS || '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0',
+    linkTokenAddress: process.env.LINK_TOKEN_ADDRESS || '0x9f1ac54BEF0DD2f6f3462EA0fa94fC62300d3a8e',
     destChainSelector: process.env.DEST_CHAIN_SELECTOR || '16015286601757825753' // Base Sepolia
 };
 
@@ -54,41 +54,134 @@ async function ensureLogsDirectory() {
     }
 }
 
+// Fund sender with link tokens
+async function ensureLinkBalance() {
+    const linkTokenContract = new ethers.Contract(
+        CONFIG.linkTokenAddress,
+        [
+            'function transfer(address to, uint256 amount) returns (bool)',
+            'function balanceOf(address account) view returns (uint256)'
+        ],
+        wallet
+    );
+
+    const requiredBalance = ethers.utils.parseUnits("20", 18); // 20 LINK
+    const currentBalance = await linkTokenContract.balanceOf(wallet.address);
+
+    if (currentBalance.lt(requiredBalance)) {
+        // Get the simulator address (first account in Anvil)
+        const simulatorAddress = "0x9f1ac54BEF0DD2f6f3462EA0fa94fC62300d3a8e";
+
+        // Impersonate the simulator account
+        await provider.send("anvil_impersonateAccount", [simulatorAddress]);
+        const simulatorSigner = provider.getSigner(simulatorAddress);
+
+        // Transfer LINK from simulator to our wallet
+        const linkTokenSimulator = linkTokenContract.connect(simulatorSigner);
+        const transferTx = await linkTokenSimulator.transfer(wallet.address, requiredBalance);
+        await transferTx.wait();
+
+        // Stop impersonating
+        await provider.send("anvil_stopImpersonatingAccount", [simulatorAddress]);
+
+        console.log(`💸 Transferred 20 LINK to wallet: ${wallet.address}`);
+    }
+}
+
 async function executeCrossChainTrade(action: 'buy' | 'sell'): Promise<VeniceLog> {
     try {
+        // Ensure wallet has LINK tokens
+        await ensureLinkBalance();
+
         const actionValue = action === 'buy' ? 0 : 1; // Map to enum values
 
-        // 1. Approve asset token
+        // 1. Get trading amount from contract
+        const tradingAmount = await senderContract.TRADING_AMOUNT();
+        console.log(`🔢 Trading amount: ${ethers.utils.formatUnits(tradingAmount)} tokens`);
+
+        // 2. Approve asset token using config address
         const assetContract = new ethers.Contract(
             CONFIG.assetTokenAddress,
-            ['function approve(address spender, uint256 amount) returns (bool)'],
+            [
+                'function approve(address spender, uint256 amount) returns (bool)',
+                'function allowance(address owner, address spender) view returns (uint256)'
+            ],
             wallet
         );
 
-        const tradingAmount = await senderContract.TRADING_AMOUNT();
-        const approveTx = await assetContract.approve(
-            CONFIG.contractAddress,
-            tradingAmount
-        );
-        await approveTx.wait();
-        console.log(`🔐 Approved ${ethers.utils.formatUnits(tradingAmount)} tokens for trading`);
+        // Check current allowance
+        const currentAllowance = await assetContract.allowance(wallet.address, CONFIG.contractAddress);
+        console.log(`ℹ️ Current allowance: ${ethers.utils.formatUnits(currentAllowance)} tokens`);
 
-        // 2. Execute cross-chain trade
+        if (currentAllowance.lt(tradingAmount)) {
+            console.log(`🔐 Approving ${ethers.utils.formatUnits(tradingAmount)} tokens for trading...`);
+            const approveTx = await assetContract.approve(CONFIG.contractAddress, tradingAmount);
+            await approveTx.wait();
+            console.log(`✅ Approval confirmed in tx: ${approveTx.hash}`);
+
+            // Verify new allowance
+            const newAllowance = await assetContract.allowance(wallet.address, CONFIG.contractAddress);
+            console.log(`ℹ️ New allowance: ${ethers.utils.formatUnits(newAllowance)} tokens`);
+        } else {
+            console.log(`👍 Sufficient allowance already exists: ${ethers.utils.formatUnits(currentAllowance)} tokens`);
+        }
+
+        // 3. Fund contract with LINK
+        const linkTokenContract = new ethers.Contract(
+            CONFIG.linkTokenAddress,
+            [
+                'function transfer(address to, uint256 amount) returns (bool)',
+                'function balanceOf(address account) view returns (uint256)'
+            ],
+            wallet
+        );
+
+        const linkAmount = ethers.utils.parseUnits("10", 18);
+        const senderLinkBalance = await linkTokenContract.balanceOf(CONFIG.contractAddress);
+
+        if (senderLinkBalance.lt(linkAmount)) {
+            console.log(`💸 Funding sender contract with 10 LINK...`);
+            const fundTx = await linkTokenContract.transfer(CONFIG.contractAddress, linkAmount);
+            await fundTx.wait();
+            console.log(`✅ Sent 10 LINK to sender contract: ${fundTx.hash}`);
+
+            const newBalance = await linkTokenContract.balanceOf(CONFIG.contractAddress);
+            console.log(`ℹ️ New LINK balance: ${ethers.utils.formatUnits(newBalance)}`);
+        } else {
+            console.log(`👍 Sufficient LINK balance: ${ethers.utils.formatUnits(senderLinkBalance)}`);
+        }
+
+        // 4. Debug contract configuration
+        console.log(`ℹ️ Contract Configuration:`);
+        console.log(`  Sender: ${CONFIG.contractAddress}`);
+        console.log(`  Receiver: ${await senderContract.receiver()}`);
+        console.log(`  Router: ${await senderContract.router()}`);
+        console.log(`  Dest Chain: ${await senderContract.destChain()}`);
+        console.log(`  Link Token: ${await senderContract.linkToken()}`);
+
+        // 5. Execute trade with only action parameter
+        console.log(`🚀 Triggering cross-chain ${action} trade...`);
         const tx = await senderContract.executeTrade(
             actionValue,
-            { gasLimit: 500000 }
+            {
+                gasLimit: 2_000_000,
+                gasPrice: ethers.utils.parseUnits("10", "gwei")
+            }
         );
         console.log(`📊 Cross-chain ${action} triggered: ${tx.hash}`);
 
-        const receipt = await tx.wait();
+        // 6. Wait for transaction
+        const receipt = await tx.wait(2);
+        console.log(`✅ Transaction mined in block: ${receipt.blockNumber}`);
 
-        // Find TradeSent event
+        // 7. Handle TradeSent event
         const tradeSentEvent = receipt.events?.find(
             (e: any) => e.event === 'TradeSent'
         );
 
         if (!tradeSentEvent) {
-            throw new Error('TradeSent event not found in transaction receipt');
+            console.log(`⚠️ TradeSent event not found. All events:`, receipt.events);
+            throw new Error('TradeSent event not found');
         }
 
         const msgId = tradeSentEvent.args.msgId;
@@ -97,7 +190,6 @@ async function executeCrossChainTrade(action: 'buy' | 'sell'): Promise<VeniceLog
   Executor: ${tradeSentEvent.args.executor}
   CCIP Message ID: ${msgId}`);
 
-        // Return log with cross-chain details
         return {
             id: Date.now().toString(),
             timestamp: new Date().toISOString(),
@@ -113,27 +205,57 @@ async function executeCrossChainTrade(action: 'buy' | 'sell'): Promise<VeniceLog
 
     } catch (error: any) {
         console.error(`❌ Cross-chain trade execution failed:`, error);
+
+        if (error.transactionHash) {
+            console.error(`🔍 Try debugging with: cast receipt ${error.transactionHash} --rpc-url ${CONFIG.rpcUrl}`);
+        }
+
         throw error;
     }
+}
+
+// Ownership management functions
+async function transferOwnership(newOwner: string) {
+    const tx = await senderContract.transferOwnership(newOwner);
+    await tx.wait();
+    console.log(`🔄 Ownership transfer initiated to ${newOwner}`);
+}
+
+async function acceptOwnership() {
+    const tx = await senderContract.acceptOwnership();
+    await tx.wait();
+    console.log(`✅ Ownership accepted`);
+}
+
+// Withdraw LINK from contract
+async function withdrawLink(amount: ethers.BigNumber) {
+    const tx = await senderContract.withdrawLink(amount);
+    await tx.wait();
+    console.log(`💸 Withdrew ${ethers.utils.formatUnits(amount)} LINK from contract`);
 }
 
 // Extract decision from the log's decision field
 function extractDecision(decisionStr: string): TradingDecision | null {
     try {
-        // Find the JSON part in the decision string
-        const jsonStart = decisionStr.indexOf('{');
-        const jsonEnd = decisionStr.lastIndexOf('}');
-
-        if (jsonStart === -1 || jsonEnd === -1 || jsonEnd < jsonStart) {
-            return null;
+        const directParse = JSON.parse(decisionStr);
+        if (directParse.decision && ['buy', 'sell', 'hold', 'wait'].includes(directParse.decision)) {
+            return directParse;
         }
-
-        const jsonStr = decisionStr.substring(jsonStart, jsonEnd + 1);
-        return JSON.parse(jsonStr);
-    } catch (error) {
-        console.error('❌ Failed to parse decision:', error);
-        return null;
+    } catch (e) {
+        const jsonMatch = decisionStr.match(/\{[^{}]*\}(?![\s\S]*\{)/);
+        if (jsonMatch) {
+            try {
+                const parsed = JSON.parse(jsonMatch[0]);
+                if (parsed.decision && ['buy', 'sell', 'hold', 'wait'].includes(parsed.decision)) {
+                    return parsed;
+                }
+            } catch (parseError) {
+                console.error('❌ JSON parse error:', parseError);
+            }
+        }
     }
+    console.log('⚠️ No valid decision found in:', decisionStr);
+    return null;
 }
 
 // Track processed IDs to avoid duplicates
@@ -156,7 +278,6 @@ async function updateVeniceLog(newLog: VeniceLog) {
         const logsContent = await readFile(LOG_FILE, 'utf-8');
         const logs: VeniceLog[] = JSON.parse(logsContent);
 
-        // Add new log at the beginning
         logs.unshift(newLog);
 
         await writeFile(LOG_FILE, JSON.stringify(logs, null, 2));
@@ -196,7 +317,7 @@ export async function processDecisions() {
                 try {
                     const tradeLog = await executeCrossChainTrade(decision);
 
-                    // Update the original log with execution details
+                    // Update original log with execution details
                     log.txHash = tradeLog.txHash;
                     log.blockNumber = tradeLog.blockNumber;
                     log.ccipMessageId = tradeLog.ccipMessageId;
@@ -206,7 +327,7 @@ export async function processDecisions() {
                     await updateVeniceLog(tradeLog);
                 } catch (error) {
                     log.status = 'failed';
-                    console.error(`❌ Failed to execute trade for log ${log.id}`);
+                    console.error(`❌ Failed to execute trade for log ${log.id}:`, error);
                 }
             } else {
                 console.log(`⏭️ Skipping trade for ${log.id}: ${decision}`);
@@ -218,7 +339,6 @@ export async function processDecisions() {
 
         if (newProcessed) {
             await saveProcessedIds(processedIds);
-            // Update the main log file with modified logs
             await writeFile(LOG_FILE, JSON.stringify(logs, null, 2));
             console.log('✅ Processed new trading decisions');
         } else {

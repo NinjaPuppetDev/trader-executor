@@ -21,27 +21,24 @@ contract MagicTraderReceiver is CCIPReceiver, Ownable {
 
     IERC20 public assetToken;
 
-    // In MagicTraderReceiver.sol
     constructor(address _router, address _assetToken) CCIPReceiver(_router) Ownable(msg.sender) {
         assetToken = IERC20(_assetToken);
     }
 
     function _ccipReceive(Client.Any2EVMMessage memory message) internal override {
-        (Action action, address executor) = abi.decode(message.data, (Action, address));
+        (Action action, address executor, uint256 amount) = abi.decode(message.data, (Action, address, uint256));
 
-        // Add token validation
-        require(message.destTokenAmounts.length > 0, "No tokens received");
-        require(message.destTokenAmounts[0].token == address(assetToken), "Invalid token");
+        require(assetToken.balanceOf(address(this)) >= amount, "Insufficient token balance");
 
-        uint256 amount = message.destTokenAmounts[0].amount;
-
-        // Transfer tokens to executor
         assetToken.safeTransfer(executor, amount);
-
         emit TradeExecuted(action, executor, amount, block.timestamp);
     }
 
-    function withdrawToken(address token, uint256 amount) external onlyOwner {
-        IERC20(token).safeTransfer(owner(), amount);
+    function depositTokens(uint256 amount) external onlyOwner {
+        assetToken.safeTransferFrom(msg.sender, address(this), amount);
+    }
+
+    function withdrawTokens(uint256 amount) external onlyOwner {
+        assetToken.safeTransfer(owner(), amount);
     }
 }
