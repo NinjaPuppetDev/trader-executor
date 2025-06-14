@@ -1,10 +1,9 @@
-
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
+
 import {Test} from "forge-std/Test.sol";
 
-
-contract test() is Test {
+contract test is Test {
     function setUp() public {
         // Set up any necessary state or mocks here
     }
