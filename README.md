@@ -29,7 +29,7 @@ anvil
 ## DeployVeniceTriggerAutomation
 
 ```
-forge script script/Deploy.s.sol:DeployVeniceAutomation   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
+forge script script/DeployVeniceUpkeep.s.sol:DeployVeniceUpkeep   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
 ```
 
 
@@ -41,30 +41,25 @@ npx ts-node --project tsconfig.backend.json backend/veniceListenerMemory.ts
 ```
 
 
-## Test Upkeep
+## Deploy TraderExecutor
 
 ```
-cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3   "performUpkeep(bytes)" 0x   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --rpc-url http://127.0.0.1:8545   --chain-id 31337   --gas-limit 300000
+forge script script/DeployTradeExecutor.s.sol:DeployTradeExecutor --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80  --rpc-url http://localhost:8545   --broadcast  
 ```
 
 
-## Deploy Receiver Base Sepolia 
-
-```
-forge script script/DeployReceiverBaseSepolia.s.sol:DeployBaseSepolia   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
-```
-
-## Deploy Sender Eth Sepolia
-
-```
-forge script script/DeploySenderEthSepolia.s.sol:DeploySepolia   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
-```
 
 ## Run Trader
 
 ```
 cd frontend
-npx ts-node --project tsconfig.backend.json backend/ccipTraderSender.ts
+npx ts-node --project tsconfig.backend.json backend/traderExecutor.ts
+```
+
+## Test Upkeep
+
+```
+cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3   "performUpkeep(bytes)" 0x   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --rpc-url http://127.0.0.1:8545   --chain-id 31337   --gas-limit 300000
 ```
 
 ## Deploy Frontend

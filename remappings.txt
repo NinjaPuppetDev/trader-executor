@@ -1,7 +1,5 @@
-@chainlink/contracts-ccip/contracts/=lib/chainlink-ccip/chains/evm/contracts/
 @chainlink/contracts/=lib/chainlink-evm/contracts/
-@chainlink/contracts/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/=lib/openzeppelin-contracts/contracts/
-@chainlink/contracts/src/v0.8/vendor/openzeppelin-solidity/v5.0.2/contracts/=lib/openzeppelin-contracts/contracts/
-@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
 @chainlink/local/=lib/chainlink-local/
+@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+
 
