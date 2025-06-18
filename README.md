@@ -32,20 +32,43 @@ anvil
 forge script script/DeployVeniceUpkeep.s.sol:DeployVeniceUpkeep   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast
 ```
 
-
-## Run Listener
+## Deploy PriceTrigger 
 
 ```
-cd frontend
-npx ts-node --project tsconfig.backend.json backend/veniceListenerMemory.ts
+forge script script/DeployPriceTrigger.s.sol:DeployPriceTrigger --rpc-url http://localhost:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 --broadcast
 ```
-
 
 ## Deploy TraderExecutor
 
 ```
 forge script script/DeployTradeExecutor.s.sol:DeployTradeExecutor --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80  --rpc-url http://localhost:8545   --broadcast  
 ```
+
+## Deploy PriceSpikeSimulation
+
+```
+forge script script/SimulatePriceSpike.s.sol:SimulatePriceSpike --rpc-url http://localhost:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 --broadcast
+```
+## Check Price Spike
+
+```
+cast send 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0   "checkPriceSpike()"   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --rpc-url http://127.0.0.1:8545   --chain-id 31337   --gas-limit 300000
+```
+
+## Run upKeepListener
+
+```
+cd frontend
+npx ts-node --project tsconfig.backend.json backend/veniceListenerMemory.ts
+```
+## Run PriceTriggerListener
+
+```
+cd frontend
+npx ts-node --project tsconfig.backend.json backend/priceTriggerListener.ts
+```
+
+
 
 
 
@@ -69,3 +92,36 @@ cd frontend
 npm run dev
 ```
 
+## MAKEFILE
+
+# Run anvil
+
+anvil
+
+# Full deployment
+
+make deploy
+
+# Run all listeners
+
+make run-upkeep-listener
+
+make run-price-trigger-listener
+
+make run-trader
+
+# Simulate price spike and check
+
+make simulate
+
+# Test upkeep manually
+
+make test-upkeep
+
+# Deploy single component
+
+make deploy-venice-trigger
+
+# Start trader executor only
+
+make run-trader

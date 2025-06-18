@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import "@chainlink/contracts/src/v0.8/automation/AutomationCompatible.sol";
+import {AutomationCompatible} from "@chainlink/contracts/src/v0.8/automation/AutomationCompatible.sol";
 
 contract VeniceUpkeep is AutomationCompatible {
+    error VeniceUpkeep__UpkeepNotNeeded();
     // State variables
+
     uint256 public lastTimestamp;
     uint256 public immutable interval;
     string public prompt; // Store prompt configuration
@@ -30,11 +32,13 @@ contract VeniceUpkeep is AutomationCompatible {
     }
 
     function performUpkeep(bytes calldata /* performData */ ) external override {
-        if ((block.timestamp - lastTimestamp) >= interval) {
+        if ((block.timestamp - lastTimestamp) < interval) {
+            revert VeniceUpkeep__UpkeepNotNeeded();
+        } else {
             lastTimestamp = block.timestamp;
-            // Emit event with current prompt configuration
-            emit RequestAnalysis(lastTimestamp, prompt);
         }
+        // Emit event with current prompt configuration
+        emit RequestAnalysis(lastTimestamp, prompt);
     }
 
     // New function for listener to submit decisions

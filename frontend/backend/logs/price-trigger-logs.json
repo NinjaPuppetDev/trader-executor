@@ -1,0 +1,39 @@
+[
+  {
+    "id": "spike-1750264419873",
+    "timestamp": "2025-06-18T16:33:39.874Z",
+    "priceContext": "Spike: 5.00% | Current: $52500 | Previous: $50000",
+    "decision": "{\"reasoning\":\"Fallback: <think>\\nOkay, let's tackle this query. The user provided a complex JSON structure with specific instructions for an AI agent. The goal is to generate a JSON response based on the given rules and data.\\n\\nFirst, I need to parse the system message. The system is in TEST MODE as an Institutional Trading Agent. The current market FGI is 52, which is neutral. The rules are strict: output must be either \\\"buy\\\" or \\\"sell\\\", no \\\"wait\\\". The trade amount has to be between 0.01-0.05 ETH equivalent. The token pa...\",\"decision\":\"wait\",\"tokenIn\":\"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2\",\"tokenOut\":\"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48\",\"amount\":\"0\",\"slippage\":1}",
+    "decisionLength": 693,
+    "status": "completed",
+    "createdAt": "2025-06-18T16:33:39.874Z",
+    "spikePercent": 5,
+    "fgi": 52
+  },
+  {
+    "id": "spike-1750265611375",
+    "timestamp": "2025-06-18T16:53:31.385Z",
+    "priceContext": "Spike: 5.00% | Current: $52500 | Previous: $50000",
+    "decision": "{\"reasoning\":\"Fallback: <think>\\nOkay, let's tackle this query. The user provided a complex JSON structure with specific instructions for an AI agent. The main goal is to generate a JSON output based on the given rules and data.\\n\\nFirst, I need to parse the system message. The system is in TEST MODE as an Institutional Trading Agent. The current market FGI is 52, which is neutral. The guidelines say to evaluate other indicators for trading signals. The absolute rules are crucial here: the output must be either \\\"buy\\\" or \\\"...\",\"decision\":\"wait\",\"tokenIn\":\"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2\",\"tokenOut\":\"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48\",\"amount\":\"0\",\"slippage\":1}",
+    "decisionLength": 690,
+    "status": "completed",
+    "createdAt": "2025-06-18T16:53:31.385Z",
+    "spikePercent": 5,
+    "fgi": 52,
+    "txHash": "0xd6d3f8892b39be25ca6a4ff7c6d728b544b8353b3ed8f1e77d67fddc2a15cfa7",
+    "blockNumber": 14
+  },
+  {
+    "id": "spike-1750265889768",
+    "timestamp": "2025-06-18T16:58:09.770Z",
+    "priceContext": "Spike: 5.00% | Current: $52500 | Previous: $50000",
+    "decision": "{\"reasoning\":\"Fallback: <think>\\nOkay, let's tackle this query. The user provided a complex scenario with specific rules and a JSON structure. First, I need to parse the system instructions carefully. The system is in TEST MODE as an Institutional Trading Agent. The current market FGI is 52, which is Neutral. The Guidance says the market is in balance, so other indicators are to be evaluated for trading signals.\\n\\nLooking at the Decision Matrix, the FGI is 52, which falls in the 30-70 range. The price action here is a 5%...\",\"decision\":\"wait\",\"tokenIn\":\"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2\",\"tokenOut\":\"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48\",\"amount\":\"0\",\"slippage\":1}",
+    "decisionLength": 687,
+    "status": "completed",
+    "createdAt": "2025-06-18T16:58:09.770Z",
+    "spikePercent": 5,
+    "fgi": 52,
+    "txHash": "0x3dc3cdcf3f7e16a72518d9a5e28a2ba533ecfbdf9c1b757f2141f505e7c65e07",
+    "blockNumber": 16
+  }
+]
