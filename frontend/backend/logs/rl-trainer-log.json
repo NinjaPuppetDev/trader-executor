@@ -1,0 +1,56 @@
+[
+  {
+    "riskLevel": 2,
+    "strategyFocus": "stability",
+    "positionSizing": "maintain",
+    "insight": "Recent spike strategy successful, maintaining stable portfolio.",
+    "actions": [
+      "Continue monitoring FGI closely for spike opportunities.",
+      "Evaluate impact of spike events on Stable assets specifically.",
+      "Consider diversifying volatile assets to reduce concentrated risk."
+    ],
+    "portfolioMetrics": {
+      "valueUSD": 3409074.5,
+      "stableBalance": 74565,
+      "volatileBalance": 20,
+      "fgi": 54
+    },
+    "timestamp": "2025-06-20T23:42:16.506Z"
+  },
+  {
+    "riskLevel": 2,
+    "strategyFocus": "stability",
+    "positionSizing": "maintain",
+    "insight": "Successful spike strategy; maintain current approach.",
+    "actions": [
+      "Continue monitoring FGI and spike occurrences.",
+      "Maintain current portfolio allocation between stable and volatile assets.",
+      "Periodically review execution speed to minimize slippage."
+    ],
+    "portfolioMetrics": {
+      "valueUSD": 3240392.525,
+      "stableBalance": 105986.25,
+      "volatileBalance": 10,
+      "fgi": 54
+    },
+    "timestamp": "2025-06-20T23:55:45.470Z"
+  },
+  {
+    "riskLevel": 3,
+    "strategyFocus": "growth",
+    "positionSizing": "maintain",
+    "insight": "Good execution, FGI inconsistency needs resolution.",
+    "actions": [
+      "Investigate FGI reporting discrepancies.",
+      "Maintain current position sizing due to success.",
+      "Backtest strategy with adjusted FGI data."
+    ],
+    "portfolioMetrics": {
+      "valueUSD": 3240392.525,
+      "stableBalance": 105986.25,
+      "volatileBalance": 10,
+      "fgi": 54
+    },
+    "timestamp": "2025-06-21T00:05:46.528Z"
+  }
+]

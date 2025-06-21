@@ -1,12 +1,12 @@
 import { ethers } from "ethers";
 import { fetchTradingSignal } from "../app/utils/venice";
 import PriceTriggerAbi from "../app/abis/PriceTrigger.json";
-import traderAbi from "../app/abis/TraderExecutor.json";
+import traderAbi from "../app/abis/TradeExecutor.json";
 import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import { lock } from 'proper-lockfile';
-import { generatePromptConfig } from "./promptService";
+import { generatePromptConfig } from "./prompts/promptService";
 
 dotenv.config();
 
@@ -33,6 +33,8 @@ interface LogEntry {
     status: "pending" | "completed" | "failed";
     txHash?: string;
     blockNumber?: number;
+    eventTxHash?: string;
+    eventBlockNumber?: number;
     error?: string;
     createdAt: string;
     fgi?: number;
@@ -44,7 +46,7 @@ const CONFIG = {
     VENICE_API_KEY: process.env.VENICE_API_KEY || "",
     PRIVATE_KEY: process.env.PRIVATE_KEY || "",
     RPC_URL: process.env.RPC_URL || "http://127.0.0.1:8545",
-    PRICE_TRIGGER_ADDRESS: process.env.PRICE_TRIGGER_ADDRESS || "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+    PRICE_TRIGGER_ADDRESS: process.env.PRICE_TRIGGER_ADDRESS || "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
     TRADER_CONTRACT_ADDRESS: process.env.TRADER_CONTRACT_ADDRESS || "",
     ABI: PriceTriggerAbi,
     GAS_BUFFER_PERCENT: 20,
@@ -135,7 +137,7 @@ class PriceTriggerListener {
                     currentPrice,
                     previousPrice,
                     changePercent,
-                    event.blockNumber
+                    event
                 );
             } catch (err) {
                 this.error("Event processing error", err);
@@ -149,12 +151,12 @@ class PriceTriggerListener {
         currentPrice: ethers.BigNumber,
         previousPrice: ethers.BigNumber,
         changePercent: ethers.BigNumber,
-        blockNumber?: number
+        event: ethers.Event
     ) {
         this.isProcessing = true;
         const eventId = `spike-${Date.now()}`;
 
-        // Convert from 8 decimals (Chainlink standard)
+        // Convert prices from 8 decimals (Chainlink standard)
         const currentPriceNum = parseFloat(ethers.utils.formatUnits(currentPrice, 8));
         const previousPriceNum = parseFloat(ethers.utils.formatUnits(previousPrice, 8));
         const changePercentNum = parseFloat(ethers.utils.formatUnits(changePercent, 2)); // Basis points
@@ -167,11 +169,13 @@ class PriceTriggerListener {
             decisionLength: 0,
             status: "pending",
             createdAt: new Date().toISOString(),
-            spikePercent: changePercentNum
+            spikePercent: changePercentNum,
+            eventTxHash: event.transactionHash,
+            eventBlockNumber: event.blockNumber
         };
 
         await this.appendLog(logEntry);
-        this.log(`🔔 Price spike detected! ${changePercentNum.toFixed(2)}% change`);
+        this.log(`🔔 Price spike detected! ${changePercentNum.toFixed(2)}% change in tx ${event.transactionHash}`);
 
         try {
             const startTime = Date.now();
@@ -198,7 +202,7 @@ class PriceTriggerListener {
             if (this.traderContract) {
                 const txHash = await this.executeTradeDecision(signal);
                 logEntry.txHash = txHash;
-                logEntry.blockNumber = blockNumber;
+                logEntry.blockNumber = await this.provider.getBlockNumber();
             }
 
             logEntry.status = "completed";
@@ -313,12 +317,14 @@ Pay special attention to momentum indicators and potential reversal signals.`
         try {
             return JSON.parse(jsonString);
         } catch (parseError) {
-            const fixedJson = jsonString
-                .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2":')
-                .replace(/'/g, '"')
-                .replace(/,\s*}/g, '}');
-
             try {
+                // Attempt to repair common JSON issues
+                const fixedJson = jsonString
+                    .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2":')
+                    .replace(/'/g, '"')
+                    .replace(/,\s*}/g, '}')
+                    .replace(/,\s*]/g, ']');
+
                 return JSON.parse(fixedJson);
             } catch {
                 return {
@@ -348,8 +354,8 @@ Pay special attention to momentum indicators and potential reversal signals.`
 
         const addressRegex = /0x[a-fA-F0-9]{40}/g;
         const addresses = rawResponse.match(addressRegex) || [];
-        const tokenIn = addresses[0] || "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
-        const tokenOut = addresses[1] || "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+        const tokenIn = addresses[0] || "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"; // WETH
+        const tokenOut = addresses[1] || "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"; // USDC
 
         const truncated = rawResponse.length > 500
             ? rawResponse.substring(0, 500) + "..."

@@ -1,0 +1,30 @@
+[
+  {
+    "stableBalance": 41490,
+    "volatileBalance": 10.003174603174603,
+    "portfolioValueUSD": 3250000,
+    "fgi": 54,
+    "timestamp": "2025-06-20T23:28:26.250Z"
+  },
+  {
+    "stableBalance": 74565,
+    "volatileBalance": 20,
+    "portfolioValueUSD": 3409074.5,
+    "fgi": 54,
+    "timestamp": "2025-06-20T23:42:04.191Z"
+  },
+  {
+    "stableBalance": 105986.25,
+    "volatileBalance": 10,
+    "portfolioValueUSD": 3240392.525,
+    "fgi": 54,
+    "timestamp": "2025-06-20T23:55:42.600Z"
+  },
+  {
+    "stableBalance": 105976.25,
+    "volatileBalance": 10.003031009117654,
+    "portfolioValueUSD": 3402211.46375,
+    "fgi": 54,
+    "timestamp": "2025-06-21T00:09:20.427Z"
+  }
+]

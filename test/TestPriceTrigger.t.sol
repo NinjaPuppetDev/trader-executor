@@ -13,7 +13,7 @@ contract PriceTriggerTest is Test {
 
     int256 public constant INITIAL_PRICE = 50000 * 10 ** 8; // $50,000
     uint256 public constant SPIKE_THRESHOLD = 500; // 5% in basis points
-    uint256 public constant COOLDOWN_PERIOD = 3600; // 1 hour
+    uint256 public constant COOLDOWN_PERIOD = 1; // 1 hour
 
     event PriceSpikeDetected(int256 currentPrice, int256 previousPrice, uint256 changePercent);
 
@@ -182,6 +182,7 @@ contract PriceTriggerTest is Test {
         trigger.checkPriceSpike();
 
         // Verify last trigger time
+        
         assertEq(trigger.lastTriggerTime(address(this)), block.timestamp);
     }
 

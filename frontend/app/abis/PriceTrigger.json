@@ -79,14 +79,21 @@
     },
     {
         "type": "function",
-        "name": "lastTriggerTime",
-        "inputs": [
+        "name": "lastPrice",
+        "inputs": [],
+        "outputs": [
             {
                 "name": "",
-                "type": "address",
-                "internalType": "address"
+                "type": "int256",
+                "internalType": "int256"
             }
         ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "lastTriggerTime",
+        "inputs": [],
         "outputs": [
             {
                 "name": "",
@@ -130,6 +137,19 @@
                 "type": "uint256",
                 "indexed": false,
                 "internalType": "uint256"
+            }
+        ],
+        "anonymous": false
+    },
+    {
+        "type": "event",
+        "name": "TradingDecisionGenerated",
+        "inputs": [
+            {
+                "name": "decision",
+                "type": "string",
+                "indexed": false,
+                "internalType": "string"
             }
         ],
         "anonymous": false

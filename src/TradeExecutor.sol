@@ -1,92 +1,70 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.28;
+pragma solidity 0.8.28;
 
-import "./interfaces/IERC20Minimal.sol";
-import "./interfaces/IUniswapV3RouterMinimal.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "./Exchange.sol";
 
 contract TradeExecutor {
-    address public immutable router;
+    using SafeERC20 for IERC20;
+
     address public owner;
-    uint256 public constant MAX_DEADLINE = 1800; // 30 minutes
+    IERC20 public immutable stableToken;
+    IERC20 public immutable volatileToken;
+    Exchange public immutable exchange;
 
-    event TradeExecuted(
-        address indexed executor, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut
-    );
-
-    event TokensDeposited(address indexed depositor, address token, uint256 amount);
-    event TokensWithdrawn(address indexed owner, address token, uint256 amount);
+    event TradeExecuted(bool buyVolatile, uint256 amountIn, uint256 amountOut, uint256 minAmountOut);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-
-    constructor(address _router) {
-        router = _router;
-        owner = msg.sender;
-    }
+    event TokensWithdrawn(address indexed token, uint256 amount);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Unauthorized");
         _;
     }
 
-    function executeTrade(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 minAmountOut,
-        uint24 poolFee,
-        uint256 deadline
-    ) external onlyOwner returns (uint256 amountOut) {
-        require(amountIn > 0, "Zero amount");
-        require(deadline > block.timestamp, "Trade expired");
-        require(deadline <= block.timestamp + MAX_DEADLINE, "Deadline too long");
+    constructor(address _stableToken, address _volatileToken, address _exchange) {
+        owner = msg.sender;
+        stableToken = IERC20(_stableToken);
+        volatileToken = IERC20(_volatileToken);
+        exchange = Exchange(_exchange);
 
-        // Check contract balance
-        uint256 balance = IERC20Minimal(tokenIn).balanceOf(address(this));
-        require(balance >= amountIn, "Insufficient contract balance");
-
-        // Approve router
-        require(IERC20Minimal(tokenIn).approve(router, amountIn), "Approval failed");
-
-        // Create params struct
-        IUniswapV3RouterMinimal.ExactInputSingleParams memory params = IUniswapV3RouterMinimal.ExactInputSingleParams({
-            tokenIn: tokenIn,
-            tokenOut: tokenOut,
-            fee: poolFee,
-            recipient: address(this),
-            deadline: deadline,
-            amountIn: amountIn,
-            amountOutMinimum: minAmountOut,
-            sqrtPriceLimitX96: 0
-        });
-
-        // Execute trade
-        amountOut = IUniswapV3RouterMinimal(router).exactInputSingle(params);
-        emit TradeExecuted(msg.sender, tokenIn, tokenOut, amountIn, amountOut);
+        // Set infinite approvals using standard approve
+        stableToken.approve(address(exchange), type(uint256).max);
+        volatileToken.approve(address(exchange), type(uint256).max);
     }
 
-    function depositTokens(address token, uint256 amount) external {
-        require(amount > 0, "Zero amount");
-        require(IERC20Minimal(token).transferFrom(msg.sender, address(this), amount), "Deposit failed");
-        emit TokensDeposited(msg.sender, token, amount);
+    function executeTrade(bool buyVolatile, uint256 amount, uint256 minAmountOut) external onlyOwner {
+        uint256 amountOut;
+
+        if (buyVolatile) {
+            require(stableToken.balanceOf(address(this)) >= amount, "Insufficient stable balance");
+            amountOut = exchange.swap(true, amount, minAmountOut);
+        } else {
+            require(volatileToken.balanceOf(address(this)) >= amount, "Insufficient volatile balance");
+            amountOut = exchange.swap(false, amount, minAmountOut);
+        }
+
+        emit TradeExecuted(buyVolatile, amount, amountOut, minAmountOut);
     }
 
     function withdrawTokens(address token, uint256 amount) external onlyOwner {
-        require(amount > 0, "Zero amount");
-        require(IERC20Minimal(token).balanceOf(address(this)) >= amount, "Insufficient contract balance");
-        require(IERC20Minimal(token).transfer(owner, amount), "Withdrawal failed");
-        emit TokensWithdrawn(owner, token, amount);
+        IERC20(token).safeTransfer(owner, amount);
+        emit TokensWithdrawn(token, amount);
     }
 
     function transferOwnership(address newOwner) external onlyOwner {
         require(newOwner != address(0), "Invalid owner");
-        owner = newOwner;
         emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
     }
 
-    function rescueETH() external onlyOwner {
-        payable(owner).transfer(address(this).balance);
+    function revokeApprovals() external onlyOwner {
+        stableToken.approve(address(exchange), 0);
+        volatileToken.approve(address(exchange), 0);
     }
 
-    function getTokenBalance(address token) external view returns (uint256) {
-        return IERC20Minimal(token).balanceOf(address(this));
+    function restoreApprovals() external onlyOwner {
+        stableToken.approve(address(exchange), type(uint256).max);
+        volatileToken.approve(address(exchange), type(uint256).max);
     }
 }

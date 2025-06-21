@@ -4,9 +4,9 @@ import { ethers } from 'ethers';
 export const CONFIG = {
     rpcUrl: 'http://localhost:8545',
     privateKey: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-    executorAddress: '0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6',
-    tokenA: '0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9',
-    tokenB: '0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9',
+    executorAddress: '0x0165878A594ca255338adfa4d48449f69242Eb8F',
+    stableToken: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+    volatileToken: '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0',
     defaultAmount: '0.03',
     slippagePercent: 1,
     poolFee: 3000,

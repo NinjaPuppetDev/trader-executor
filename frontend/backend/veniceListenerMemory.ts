@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import { lock } from 'proper-lockfile';
-import { generatePromptConfig } from "./promptService";
+import { generatePromptConfig } from "./prompts/promptService";
 
 dotenv.config();
 
