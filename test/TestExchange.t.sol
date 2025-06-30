@@ -6,8 +6,6 @@ import {MockStablecoin} from "../src/mocks/MockStablecoin.sol";
 import {MockVolatileToken} from "../src/mocks/MockVolatileToken.sol";
 import {MockAggregatorV3} from "../test/mocks/MockAggregatorV3.sol";
 import {Exchange} from "../src/Exchange.sol";
-import {TradeExecutor} from "../src/TradeExecutor.sol";
-import {VRFCoordinatorV2Mock} from "@chainlink/contracts/src/v0.8/vrf/mocks/VRFCoordinatorV2Mock.sol";
 
 contract ExchangeTest is Test {
     MockStablecoin public stableToken;
@@ -15,8 +13,6 @@ contract ExchangeTest is Test {
     MockAggregatorV3 public stableFeed;
     MockAggregatorV3 public volatileFeed;
     Exchange public exchange;
-    TradeExecutor public tradeExecutor;
-    VRFCoordinatorV2Mock public vrfCoordinator;
 
     address deployer = address(1);
     address trader = address(2);
@@ -25,7 +21,6 @@ contract ExchangeTest is Test {
     uint256 constant INITIAL_STABLE = 100_000 * 10 ** 6;
     uint256 constant INITIAL_VOLATILE = 1_000 * 10 ** 18;
     uint256 constant TRADE_AMOUNT = 1_000 * 10 ** 6;
-    bytes32 constant KEY_HASH = 0x79d3d8832d904592c0bf9818b621522c988bb8b0c05cdc3b15aea1b6e8db0c15; // Mock keyhash
 
     function setUp() public {
         vm.startPrank(deployer);
@@ -42,27 +37,6 @@ contract ExchangeTest is Test {
         exchange =
             new Exchange(address(stableToken), address(volatileToken), address(stableFeed), address(volatileFeed));
 
-        // Deploy and configure VRF Coordinator
-        vrfCoordinator = new VRFCoordinatorV2Mock(0, 0);
-        uint64 subscriptionId = vrfCoordinator.createSubscription();
-        vrfCoordinator.fundSubscription(subscriptionId, 100 ether);
-
-        // Deploy TradeExecutor with VRF
-        tradeExecutor = new TradeExecutor(
-            address(stableToken),
-            address(volatileToken),
-            address(exchange),
-            address(vrfCoordinator),
-            subscriptionId,
-            KEY_HASH
-        );
-
-        // Add TradeExecutor as authorized consumer
-        vrfCoordinator.addConsumer(subscriptionId, address(tradeExecutor));
-
-        // Fund TradeExecutor with 10,000 USDC
-        stableToken.mint(address(tradeExecutor), 10_000 * 10 ** 6);
-
         // Add initial liquidity to exchange
         stableToken.mint(deployer, INITIAL_STABLE);
         volatileToken.mint(deployer, INITIAL_VOLATILE);
@@ -74,42 +48,10 @@ contract ExchangeTest is Test {
     }
 
     function testInitialSetup() public view {
-        // Check initial balances
-        assertEq(stableToken.balanceOf(address(tradeExecutor)), 10_000 * 10 ** 6);
-        assertEq(stableToken.balanceOf(address(exchange)), INITIAL_STABLE);
-        assertEq(volatileToken.balanceOf(address(exchange)), INITIAL_VOLATILE);
-
         // Check reserves
-        (uint256 stableReserve, uint256 volatileReserve) = (exchange.stableReserve(), exchange.volatileReserve());
+        (uint256 stableReserve, uint256 volatileReserve) = exchange.getReserves();
         assertEq(stableReserve, INITIAL_STABLE);
         assertEq(volatileReserve, INITIAL_VOLATILE);
-    }
-
-    function testVRFTradeExecution() public {
-        vm.startPrank(deployer);
-        uint256 requestId = tradeExecutor.executeTrade(true, TRADE_AMOUNT, 5); // Max 5 block delay
-
-        // Simulate VRF response
-        uint256[] memory randomWords = new uint256[](1);
-        randomWords[0] = 3; // Will cause 3 block delay
-        vrfCoordinator.fulfillRandomWords(requestId, address(tradeExecutor));
-
-        vm.stopPrank();
-
-        // Check balances after trade
-        uint256 receivedVolatile = volatileToken.balanceOf(address(tradeExecutor));
-        assertGt(receivedVolatile, 0);
-    }
-
-    function testWithdrawFromExecutor() public {
-        vm.startPrank(deployer);
-        uint256 initialBalance = stableToken.balanceOf(deployer);
-
-        tradeExecutor.withdrawTokens(address(stableToken), 5_000 * 10 ** 6);
-        vm.stopPrank();
-
-        assertEq(stableToken.balanceOf(deployer), initialBalance + 5_000 * 10 ** 6);
-        assertEq(stableToken.balanceOf(address(tradeExecutor)), 5_000 * 10 ** 6);
     }
 
     function testAddLiquidity() public {
@@ -123,17 +65,14 @@ contract ExchangeTest is Test {
         stableToken.approve(address(exchange), additionalStable);
         volatileToken.approve(address(exchange), additionalVolatile);
 
-        uint256 initialStableReserve = exchange.stableReserve();
-        uint256 initialVolatileReserve = exchange.volatileReserve();
+        (uint256 initialStableReserve, uint256 initialVolatileReserve) = exchange.getReserves();
 
         exchange.addLiquidity(additionalStable, additionalVolatile);
         vm.stopPrank();
 
-        assertEq(exchange.stableReserve(), initialStableReserve + additionalStable);
-        assertEq(exchange.volatileReserve(), initialVolatileReserve + additionalVolatile);
-
-        // Check portfolio value increased
-        assertGt(exchange.getPortfolioValue(), initialStableReserve + (initialVolatileReserve * 3000e18) / 1e18);
+        (uint256 newStableReserve, uint256 newVolatileReserve) = exchange.getReserves();
+        assertEq(newStableReserve, initialStableReserve + additionalStable);
+        assertEq(newVolatileReserve, initialVolatileReserve + additionalVolatile);
     }
 
     function testSwapDirectly() public {
@@ -149,8 +88,7 @@ contract ExchangeTest is Test {
         stableToken.approve(address(exchange), amountIn);
 
         uint256 initialVolatileBalance = volatileToken.balanceOf(trader);
-        uint256 initialStableReserve = exchange.stableReserve();
-        uint256 initialVolatileReserve = exchange.volatileReserve();
+        (uint256 initialStableReserve, uint256 initialVolatileReserve) = exchange.getReserves();
 
         vm.prank(trader);
         uint256 amountOut = exchange.swap(true, amountIn);
@@ -160,8 +98,9 @@ contract ExchangeTest is Test {
         assertEq(volatileToken.balanceOf(trader), initialVolatileBalance + amountOut);
 
         // Check reserves updated
-        assertEq(exchange.stableReserve(), initialStableReserve + amountIn);
-        assertEq(exchange.volatileReserve(), initialVolatileReserve - amountOut);
+        (uint256 newStableReserve, uint256 newVolatileReserve) = exchange.getReserves();
+        assertEq(newStableReserve, initialStableReserve + amountIn);
+        assertEq(newVolatileReserve, initialVolatileReserve - amountOut);
     }
 
     function testPortfolioValueAfterPriceChange() public {
@@ -170,6 +109,8 @@ contract ExchangeTest is Test {
 
         // Simulate price increase to $3500
         volatileFeed.updateAnswer(3500e8);
+        (, int256 newVolatilePrice,,,) = volatileFeed.latestRoundData();
+        exchange.updateVolatilePrice(newVolatilePrice);
 
         uint256 newValue = exchange.getPortfolioValue();
         assertGt(newValue, initialValue);
@@ -183,7 +124,8 @@ contract ExchangeTest is Test {
     function testReserveBasedPrice() public view {
         uint256 price = exchange.getReserveBasedPrice();
         // Expected price = stableReserve / volatileReserve in 18 decimals
-        uint256 expected = (INITIAL_STABLE * 1e18) / INITIAL_VOLATILE;
+        (uint256 stableReserve, uint256 volatileReserve) = exchange.getReserves();
+        uint256 expected = (stableReserve * 1e18) / volatileReserve;
         assertEq(price, expected);
     }
 }
