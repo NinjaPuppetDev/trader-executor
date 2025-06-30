@@ -60,7 +60,7 @@
                 "internalType": "string"
             }
         ],
-        "stateMutability": "pure"
+        "stateMutability": "view"
     },
     {
         "type": "function",
@@ -103,6 +103,19 @@
     },
     {
         "type": "function",
+        "name": "lastUpdate",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
         "name": "latestRoundData",
         "inputs": [],
         "outputs": [
@@ -136,31 +149,7 @@
     },
     {
         "type": "function",
-        "name": "rounds",
-        "inputs": [
-            {
-                "name": "",
-                "type": "uint80",
-                "internalType": "uint80"
-            }
-        ],
-        "outputs": [
-            {
-                "name": "answer",
-                "type": "int256",
-                "internalType": "int256"
-            },
-            {
-                "name": "timestamp",
-                "type": "uint256",
-                "internalType": "uint256"
-            }
-        ],
-        "stateMutability": "view"
-    },
-    {
-        "type": "function",
-        "name": "setPrice",
+        "name": "updateAnswer",
         "inputs": [
             {
                 "name": "_newPrice",
@@ -182,6 +171,6 @@
                 "internalType": "uint256"
             }
         ],
-        "stateMutability": "pure"
+        "stateMutability": "view"
     }
 ]

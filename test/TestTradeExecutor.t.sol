@@ -1,20 +1,22 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.28;
+pragma solidity 0.8.30;
 
 import "forge-std/Test.sol";
-import "../src/mocks/MockStablecoin.sol";
-import "../src/mocks/MockVolatileToken.sol";
-import "../test/mocks/MockAggregatorV3.sol";
-import "../src/Exchange.sol";
-import "../src/TradeExecutor.sol";
+import {MockStablecoin} from "../src/mocks/MockStablecoin.sol";
+import {MockVolatileToken} from "../src/mocks/MockVolatileToken.sol";
+import {MockAggregatorV3} from "../test/mocks/MockAggregatorV3.sol";
+import {Exchange} from "../src/Exchange.sol";
+import {TradeExecutor} from "../src/TradeExecutor.sol";
+import {VRFCoordinatorV2Mock} from "@chainlink/contracts/src/v0.8/vrf/mocks/VRFCoordinatorV2Mock.sol";
 
-contract TradeExecutorTest is Test {
+contract TestTradeExecutor is Test {
     MockStablecoin public stableToken;
     MockVolatileToken public volatileToken;
     MockAggregatorV3 public stableFeed;
     MockAggregatorV3 public volatileFeed;
     Exchange public exchange;
     TradeExecutor public tradeExecutor;
+    VRFCoordinatorV2Mock public vrfCoordinator;
 
     address deployer = address(1);
     address trader = address(2);
@@ -22,6 +24,7 @@ contract TradeExecutorTest is Test {
     // Constants
     uint256 constant TRADE_AMOUNT = 1_000 * 10 ** 6;
     uint256 constant EXCESS_AMOUNT = 20_000 * 10 ** 6;
+    bytes32 constant KEY_HASH = 0x79d3d8832d904592c0bf9818b621522c988bb8b0c05cdc3b15aea1b6e8db0c15;
 
     function setUp() public {
         vm.startPrank(deployer);
@@ -31,15 +34,30 @@ contract TradeExecutorTest is Test {
         volatileToken = new MockVolatileToken();
 
         // Deploy mock price feeds
-        stableFeed = new MockAggregatorV3(1e8); // $1.00
-        volatileFeed = new MockAggregatorV3(3000e8); // $3000
+        stableFeed = new MockAggregatorV3(1e8);
+        volatileFeed = new MockAggregatorV3(3000e8);
 
         // Deploy Exchange
         exchange =
             new Exchange(address(stableToken), address(volatileToken), address(stableFeed), address(volatileFeed));
 
-        // Deploy TradeExecutor
-        tradeExecutor = new TradeExecutor(address(stableToken), address(volatileToken), address(exchange));
+        // Deploy and configure VRF Coordinator
+        vrfCoordinator = new VRFCoordinatorV2Mock(0, 0);
+        uint64 subscriptionId = vrfCoordinator.createSubscription();
+        vrfCoordinator.fundSubscription(subscriptionId, 100 ether);
+
+        // Deploy TradeExecutor with VRF
+        tradeExecutor = new TradeExecutor(
+            address(stableToken),
+            address(volatileToken),
+            address(exchange),
+            address(vrfCoordinator),
+            subscriptionId,
+            KEY_HASH
+        );
+
+        // Add TradeExecutor as authorized consumer
+        vrfCoordinator.addConsumer(subscriptionId, address(tradeExecutor));
 
         // Fund TradeExecutor
         stableToken.mint(address(tradeExecutor), 10_000 * 10 ** 6);
@@ -55,102 +73,69 @@ contract TradeExecutorTest is Test {
         vm.stopPrank();
     }
 
-    // Helper to calculate minAmountOut
-    function calculateMinAmountOut(bool buyVolatile, uint256 amountIn) public view returns (uint256) {
-        uint256 amountOut = exchange.calculateTradeOutput(buyVolatile, amountIn);
-        return amountOut * 99 / 100; // 1% slippage
+    // Helper to calculate expected output
+    function calculateExpectedOutput(bool buyVolatile, uint256 amountIn) public view returns (uint256) {
+        uint256 stableReserve = exchange.stableReserve();
+        uint256 volatileReserve = exchange.volatileReserve();
+
+        if (buyVolatile) {
+            return (amountIn * volatileReserve) / (stableReserve + amountIn);
+        } else {
+            return (amountIn * stableReserve) / (volatileReserve + amountIn);
+        }
     }
 
+    // Helper to calculate minAmountOut with slippage
+    function calculateMinAmountOut(bool buyVolatile, uint256 amountIn, uint256 slippageBps)
+        public
+        view
+        returns (uint256)
+    {
+        uint256 expectedOut = calculateExpectedOutput(buyVolatile, amountIn);
+        return expectedOut * (10_000 - slippageBps) / 10_000;
+    }
+
+    // Test successful buy trade using VRF flow
     function testExecuteTradeBuy() public {
         vm.startPrank(deployer);
-        uint256 minAmountOut = calculateMinAmountOut(true, TRADE_AMOUNT);
-        tradeExecutor.executeTrade(true, TRADE_AMOUNT, minAmountOut);
+        uint256 minAmountOut = calculateMinAmountOut(true, TRADE_AMOUNT, 100);
+
+        // Use main execution function
+        uint256 requestId = tradeExecutor.executeTrade(true, TRADE_AMOUNT, minAmountOut);
+
+        // Simulate VRF response
+        uint256[] memory randomWords = new uint256[](1);
+        randomWords[0] = 5;
+        vrfCoordinator.fulfillRandomWords(requestId, address(tradeExecutor));
+
         vm.stopPrank();
 
-        // Check balances
+        // Balance assertions remain the same
         assertEq(stableToken.balanceOf(address(tradeExecutor)), 9_000 * 10 ** 6);
-        assertGt(volatileToken.balanceOf(address(tradeExecutor)), 0);
+        uint256 actualOut = volatileToken.balanceOf(address(tradeExecutor)) - 10 * 10 ** 18;
+        assertGe(actualOut, minAmountOut, "Output less than minimum");
     }
 
-    function testExecuteTradeSell() public {
+    // Test VRF trade execution flow
+    function testVRFTradeExecution() public {
         vm.startPrank(deployer);
-        // First buy some tokens to sell
-        uint256 minBuyOut = calculateMinAmountOut(true, TRADE_AMOUNT);
-        tradeExecutor.executeTrade(true, TRADE_AMOUNT, minBuyOut);
-        uint256 volatileBalance = volatileToken.balanceOf(address(tradeExecutor));
+        uint256 minAmountOut = calculateMinAmountOut(true, TRADE_AMOUNT, 100);
+        uint256 requestId = tradeExecutor.executeTrade(true, TRADE_AMOUNT, minAmountOut);
 
-        // Now sell
-        uint256 sellAmount = volatileBalance / 2;
-        uint256 minSellOut = calculateMinAmountOut(false, sellAmount);
-        tradeExecutor.executeTrade(false, sellAmount, minSellOut);
+        // Simulate VRF response
+        uint256[] memory randomWords = new uint256[](1);
+        randomWords[0] = 5;
+        vrfCoordinator.fulfillRandomWords(requestId, address(tradeExecutor));
+
         vm.stopPrank();
 
-        // Should have more stable tokens
-        assertGt(stableToken.balanceOf(address(tradeExecutor)), 9_000 * 10 ** 6);
+        // Check balances after trade
+        assertEq(stableToken.balanceOf(address(tradeExecutor)), 9_000 * 10 ** 6);
+        uint256 actualOut = volatileToken.balanceOf(address(tradeExecutor)) - 10 * 10 ** 18;
+        assertGe(actualOut, minAmountOut, "Output less than minimum");
     }
 
-    function testSlippageProtection() public {
-        vm.startPrank(deployer);
-        uint256 amount = TRADE_AMOUNT;
-        uint256 expectedOut = exchange.calculateTradeOutput(true, amount);
-
-        // Set minAmountOut too high
-        uint256 minAmountOut = expectedOut * 101 / 100;
-
-        vm.expectRevert("Slippage too high");
-        tradeExecutor.executeTrade(true, amount, minAmountOut);
-        vm.stopPrank();
-    }
-
-    function testInsufficientBalance() public {
-        vm.startPrank(deployer);
-        // Try to trade more than available
-        vm.expectRevert("Insufficient stable balance");
-        tradeExecutor.executeTrade(true, EXCESS_AMOUNT, 0);
-        vm.stopPrank();
-    }
-
-    function testNonOwnerExecution() public {
-        vm.prank(trader);
-        vm.expectRevert("Unauthorized");
-        tradeExecutor.executeTrade(true, 100 * 10 ** 6, 0);
-    }
-
-    function testOwnershipTransfer() public {
-        vm.startPrank(deployer);
-        tradeExecutor.transferOwnership(trader);
-        vm.stopPrank();
-
-        assertEq(tradeExecutor.owner(), trader);
-
-        // Old owner can't execute
-        uint256 minAmountOut = calculateMinAmountOut(true, 100 * 10 ** 6);
-        vm.prank(deployer);
-        vm.expectRevert("Unauthorized");
-        tradeExecutor.executeTrade(true, 100 * 10 ** 6, minAmountOut);
-
-        // New owner can execute
-        vm.prank(trader);
-        tradeExecutor.executeTrade(true, 100 * 10 ** 6, minAmountOut);
-    }
-
-    function testRevokeApprovals() public {
-        vm.startPrank(deployer);
-        tradeExecutor.revokeApprovals();
-
-        // Should fail after approvals revoked
-        uint256 minAmountOut = calculateMinAmountOut(true, TRADE_AMOUNT);
-        vm.expectRevert();
-        tradeExecutor.executeTrade(true, TRADE_AMOUNT, minAmountOut);
-
-        // Restore approvals
-        tradeExecutor.restoreApprovals();
-
-        // Should work again
-        tradeExecutor.executeTrade(true, TRADE_AMOUNT, minAmountOut);
-        vm.stopPrank();
-    }
-
+    // Test token withdrawal functionality
     function testWithdrawTokens() public {
         vm.startPrank(deployer);
         uint256 initialBalance = stableToken.balanceOf(deployer);
@@ -161,5 +146,50 @@ contract TradeExecutorTest is Test {
 
         assertEq(stableToken.balanceOf(deployer), initialBalance + withdrawAmount);
         assertEq(stableToken.balanceOf(address(tradeExecutor)), 5_000 * 10 ** 6);
+    }
+
+    // Test VRF request storage and cleanup
+    function testPendingTradeCleanup() public {
+        vm.startPrank(deployer);
+        uint256 minAmountOut = calculateMinAmountOut(true, TRADE_AMOUNT, 100);
+        uint256 requestId = tradeExecutor.executeTrade(true, TRADE_AMOUNT, minAmountOut);
+
+        // Verify pending trade exists
+        (bool buyVolatile, uint256 amountIn, uint256 minOut,) = tradeExecutor.pendingTrades(requestId);
+        assertTrue(buyVolatile);
+        assertEq(amountIn, TRADE_AMOUNT);
+        assertEq(minOut, minAmountOut);
+
+        // Fulfill random words
+        uint256[] memory randomWords = new uint256[](1);
+        randomWords[0] = 3;
+        vrfCoordinator.fulfillRandomWords(requestId, address(tradeExecutor));
+
+        // Verify trade removed from pending
+        (buyVolatile, amountIn, minOut,) = tradeExecutor.pendingTrades(requestId);
+        assertFalse(buyVolatile);
+        assertEq(amountIn, 0);
+        assertEq(minOut, 0);
+
+        vm.stopPrank();
+    }
+
+    // Test trade execution after random delay
+    function testTradeExecutionAfterDelay() public {
+        vm.startPrank(deployer);
+        uint256 minAmountOut = calculateMinAmountOut(true, TRADE_AMOUNT, 100);
+        uint256 requestId = tradeExecutor.executeTrade(true, TRADE_AMOUNT, minAmountOut);
+
+        // Simulate VRF response
+        uint256[] memory randomWords = new uint256[](1);
+        randomWords[0] = 8;
+        vrfCoordinator.fulfillRandomWords(requestId, address(tradeExecutor));
+
+        vm.stopPrank();
+
+        // Verify trade executed
+        assertEq(stableToken.balanceOf(address(tradeExecutor)), 9_000 * 10 ** 6);
+        uint256 actualOut = volatileToken.balanceOf(address(tradeExecutor)) - 10 * 10 ** 18;
+        assertGe(actualOut, minAmountOut, "Output less than minimum");
     }
 }

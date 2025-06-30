@@ -27,6 +27,19 @@
     },
     {
         "type": "function",
+        "name": "MAX_DATA_AGE",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
         "name": "addLiquidity",
         "inputs": [
             {
@@ -45,31 +58,33 @@
     },
     {
         "type": "function",
-        "name": "calculateTradeOutput",
-        "inputs": [
-            {
-                "name": "buyVolatile",
-                "type": "bool",
-                "internalType": "bool"
-            },
-            {
-                "name": "amountIn",
-                "type": "uint256",
-                "internalType": "uint256"
-            }
-        ],
+        "name": "currentStablePrice",
+        "inputs": [],
         "outputs": [
             {
                 "name": "",
-                "type": "uint256",
-                "internalType": "uint256"
+                "type": "int256",
+                "internalType": "int256"
             }
         ],
         "stateMutability": "view"
     },
     {
         "type": "function",
-        "name": "getNormalizedPrice",
+        "name": "currentVolatilePrice",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "int256",
+                "internalType": "int256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "getPortfolioValue",
         "inputs": [],
         "outputs": [
             {
@@ -82,7 +97,38 @@
     },
     {
         "type": "function",
-        "name": "getPortfolioValue",
+        "name": "getReserveBasedPrice",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "getReserves",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "stable",
+                "type": "uint256",
+                "internalType": "uint256"
+            },
+            {
+                "name": "volatile",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "lastPriceUpdate",
         "inputs": [],
         "outputs": [
             {
@@ -145,11 +191,6 @@
                 "name": "amountIn",
                 "type": "uint256",
                 "internalType": "uint256"
-            },
-            {
-                "name": "minAmountOut",
-                "type": "uint256",
-                "internalType": "uint256"
             }
         ],
         "outputs": [
@@ -159,6 +200,32 @@
                 "internalType": "uint256"
             }
         ],
+        "stateMutability": "nonpayable"
+    },
+    {
+        "type": "function",
+        "name": "updateStablePrice",
+        "inputs": [
+            {
+                "name": "_newPrice",
+                "type": "int256",
+                "internalType": "int256"
+            }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+    },
+    {
+        "type": "function",
+        "name": "updateVolatilePrice",
+        "inputs": [
+            {
+                "name": "_newPrice",
+                "type": "int256",
+                "internalType": "int256"
+            }
+        ],
+        "outputs": [],
         "stateMutability": "nonpayable"
     },
     {
@@ -227,6 +294,19 @@
     },
     {
         "type": "event",
+        "name": "PortfolioValueUpdated",
+        "inputs": [
+            {
+                "name": "totalValue",
+                "type": "uint256",
+                "indexed": false,
+                "internalType": "uint256"
+            }
+        ],
+        "anonymous": false
+    },
+    {
+        "type": "event",
         "name": "Swapped",
         "inputs": [
             {
@@ -249,12 +329,6 @@
             },
             {
                 "name": "amountOut",
-                "type": "uint256",
-                "indexed": false,
-                "internalType": "uint256"
-            },
-            {
-                "name": "minAmountOut",
                 "type": "uint256",
                 "indexed": false,
                 "internalType": "uint256"

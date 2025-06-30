@@ -1,506 +1,618 @@
 import { ethers } from 'ethers';
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, stat } from 'fs/promises';
 import path from 'path';
 import { existsSync } from 'fs';
-import { getFearAndGreedIndex } from './utils/fgiService';
+import { lock } from 'proper-lockfile';
+import WebSocket from 'isomorphic-ws';
+import { TradeExecutionLog, TradingDecision } from './types';
 
-// Types
-interface BaseLog {
-    id: string;
-    timestamp: string;
-    decision: string;
-    decisionLength: number;
-    status: 'completed' | 'pending' | 'failed' | 'error';
-    createdAt: string;
-    txHash?: string;
-    blockNumber?: number;
-    error?: string;
-    fgi?: number;
-}
+// Define TradeStatus type if not already imported
+type TradeStatus = 'invalid' | 'skipped' | 'executed';
+import { allocatePort, releasePort, isPortAvailable } from './shared/portManager';
+import { getLogger } from './shared/logger';
 
-interface VeniceLog extends BaseLog {
-    source: 'venice';
-    prompt: string;
-}
-
-interface PriceTriggerLog extends BaseLog {
-    source: 'price-trigger';
-    priceContext: string;
-    spikePercent: number;
-    fgi?: number;
-    fgiClassification?: string;
-}
-
-interface TradeExecutionLog extends BaseLog {
-    source: 'trade-execution';
-    sourceLogId: string;
-    sourceType: 'venice' | 'price-trigger';
-    amountIn: string;
-    tokenIn: string;
-    tokenOut: string;
-    minAmountOut: string;
-    actualAmountOut?: string;
-    gasUsed?: string;
-    decisionStatus: 'executed' | 'skipped' | 'invalid';
-}
-
-type LogEntry = VeniceLog | PriceTriggerLog | TradeExecutionLog;
-
-interface TradingDecision {
-    decision: 'buy' | 'sell' | 'hold' | 'wait';
-    tokenIn?: string;
-    tokenOut?: string;
-    amount?: string;
-    slippage?: number;
-}
-
-// Updated Configuration
+// ======================
+// Configuration
+// ======================
 const CONFIG = {
-    rpcUrl: 'http://localhost:8545',
+    rpcUrl: 'http://127.0.0.1:8545',
     privateKey: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-    executorAddress: '0x0165878A594ca255338adfa4d48449f69242Eb8F',
-    stableToken: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',  // USDC (6 decimals)
-    volatileToken: '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0',  // MVT (18 decimals)
-    defaultAmount: '10',  // Default trade amount
-    slippagePercent: 1,   // Default slippage percentage
-    maxGasPrice: ethers.utils.parseUnits('100', 'gwei').toString(),
-    minContractBalance: '10'  // Minimum token balance in contract
+    executorAddress: '0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6',
+    stableToken: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+    volatileToken: '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0',
+    defaultAmount: '10',
+    slippagePercent: 1,
+    minContractBalance: '10',
+    maxTradeAmount: '0.04',
+    processingDelay: 5000,
+    minTradeAmount: '0.001',
+    wsReconnectInterval: 5000,
+    wsMaxRetries: 5,
+    heartbeatInterval: 30000
 };
 
-// File paths
+// ======================
+// File Paths
+// ======================
 const LOGS_DIR = path.join(__dirname, 'logs');
-const VENICE_LOG_FILE = path.join(LOGS_DIR, 'venice-logs.json');
-const PRICE_TRIGGER_LOG_FILE = path.join(LOGS_DIR, 'price-trigger-logs.json');
-const TRADE_EXECUTIONS_FILE = path.join(LOGS_DIR, 'trade-executions.json');
-const PROCESSED_FILE = path.join(LOGS_DIR, 'processed.json');
+const PRICE_DETECTION_FILE = path.join(LOGS_DIR, 'price-detections.json');
+const TRADE_EXECUTIONS_FILE = path.join(LOGS_DIR, 'executed-trades.json');
+const PROCESSED_FILE = path.join(LOGS_DIR, 'processed-ids.json');
 
-// Setup provider and wallet
+// ======================
+// Global Declarations
+// ======================
+const logger = getLogger('trade-executor');
 const provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
 const wallet = new ethers.Wallet(CONFIG.privateKey, provider);
+let executorContract: ethers.Contract;
+let wsClient: WebSocket | null = null;
+let wsConnectionAttempts = 0;
+let allocatedWsPort: number | null = null;
 
-// Initialize environment
-async function setupEnvironment() {
+// ======================
+// WebSocket Management
+// ======================
+async function setupWebSocketServer() {
     try {
-        if (!existsSync(LOGS_DIR)) {
-            await mkdir(LOGS_DIR, { recursive: true });
-            console.log(`📁 Created logs directory at ${LOGS_DIR}`);
+        allocatedWsPort = await allocatePort('tradeExecutorWs');
+
+        // Verify port availability at system level
+        const isAvailable = await isPortAvailable(allocatedWsPort);
+        if (!isAvailable) {
+            throw new Error(`Port ${allocatedWsPort} is already in use at system level`);
         }
 
-        const files = [
-            { path: VENICE_LOG_FILE, default: '[]' },
-            { path: PRICE_TRIGGER_LOG_FILE, default: '[]' },
-            { path: TRADE_EXECUTIONS_FILE, default: '[]' },
-            { path: PROCESSED_FILE, default: '[]' }
-        ];
+        const wss = new WebSocket.Server({ port: allocatedWsPort });
+        logger.info(`📡 Trade Executor WebSocket server started on port ${allocatedWsPort}`);
 
-        for (const file of files) {
-            let shouldWrite = false;
+        wss.on('connection', async (ws: WebSocket) => {
+            logger.info('🔌 New client connected to Executed Trades WebSocket');
 
-            if (!existsSync(file.path)) {
-                shouldWrite = true;
-            } else {
-                try {
-                    const content = await readFile(file.path, 'utf-8');
-                    JSON.parse(content);
-                } catch (error) {
-                    console.warn(`⚠️ ${path.basename(file.path)} is invalid, resetting...`);
-                    shouldWrite = true;
+            // Setup heartbeat
+            let isAlive = true;
+            const heartbeatInterval = setInterval(() => {
+                if (!isAlive) {
+                    logger.warn('Terminating unresponsive client');
+                    ws.terminate();
+                    return;
                 }
+
+                isAlive = false;
+                ws.ping();
+            }, CONFIG.heartbeatInterval);
+
+            ws.on('pong', () => {
+                isAlive = true;
+            });
+
+            try {
+                const content = await readFile(TRADE_EXECUTIONS_FILE, 'utf-8');
+                const logs = content.trim() ? JSON.parse(content) : [];
+
+                ws.send(JSON.stringify({
+                    type: 'initialLogs',
+                    data: logs.slice(0, 50)
+                }));
+            } catch (error) {
+                logger.error('Error sending initial logs:', error);
             }
 
-            if (shouldWrite) {
-                await writeFile(file.path, file.default, 'utf-8');
-                console.log(`📄 Initialized ${path.basename(file.path)}`);
-            }
-        }
+            ws.on('close', () => {
+                logger.info('🔌 Client disconnected');
+                clearInterval(heartbeatInterval);
+            });
+        });
 
-        console.log('✅ Environment setup complete');
+        wss.on('error', (err: Error) => {
+            if (err.message.includes('EADDRINUSE')) {
+                logger.warn('Port conflict detected');
+            } else {
+                logger.error('WebSocket server error:', err);
+            }
+        });
+
+        return wss;
     } catch (error) {
-        console.error('❌ Environment setup failed:', error);
+        logger.error('WebSocket server setup failed:', error);
+        if (allocatedWsPort) {
+            releasePort(allocatedWsPort);
+        }
         throw error;
     }
 }
 
-// Save trade execution log
-async function logTradeExecution(entry: TradeExecutionLog) {
+function connectToWebSocketServer() {
+    if (!allocatedWsPort) {
+        logger.error('WebSocket port not allocated');
+        return;
+    }
+
+    wsClient = new WebSocket(`ws://localhost:${allocatedWsPort}`);
+
+    wsClient.on('open', () => {
+        wsConnectionAttempts = 0;
+        logger.info(`🔌 Connected to Trade Executor WebSocket server on port ${allocatedWsPort}`);
+    });
+
+    wsClient.on('error', (err: unknown) => {
+        logger.error("WebSocket connection error", err);
+
+        // Attempt reconnect with exponential backoff
+        wsConnectionAttempts++;
+        if (wsConnectionAttempts <= CONFIG.wsMaxRetries) {
+            const delay = Math.min(
+                CONFIG.wsReconnectInterval * Math.pow(1.5, wsConnectionAttempts),
+                30000
+            );
+            logger.info(`♻️ Reconnecting in ${delay / 1000}s (attempt ${wsConnectionAttempts}/${CONFIG.wsMaxRetries})`);
+            setTimeout(() => connectToWebSocketServer(), delay);
+        } else {
+            logger.error("❌ Maximum WebSocket connection attempts reached");
+        }
+    });
+
+    wsClient.on('close', () => {
+        logger.info("🔌 WebSocket connection closed");
+        if (wsConnectionAttempts < CONFIG.wsMaxRetries) {
+            setTimeout(() => connectToWebSocketServer(), CONFIG.wsReconnectInterval);
+        }
+    });
+}
+
+async function broadcastTradeUpdate(log: TradeExecutionLog) {
+    if (!wsClient || wsClient.readyState !== WebSocket.OPEN) {
+        logger.warn("⚠️ WebSocket not connected, skipping broadcast");
+        return;
+    }
+
     try {
-        const logsContent = await readFile(TRADE_EXECUTIONS_FILE, 'utf-8');
-        const logs: TradeExecutionLog[] = JSON.parse(logsContent);
+        const message = JSON.stringify({
+            type: 'tradeUpdate',
+            data: log
+        });
+        wsClient.send(message);
+        logger.info(`📤 Broadcasted trade update for ${log.id}`);
+    } catch (err) {
+        logger.error("WebSocket send error", err);
+    }
+}
+
+// ======================
+// Core Functions
+// ======================
+async function logTradeExecution(entry: TradeExecutionLog) {
+    return withFileLock(TRADE_EXECUTIONS_FILE, async (content) => {
+        const logs: TradeExecutionLog[] = content.trim() ? JSON.parse(content) : [];
         logs.unshift(entry);
         await writeFile(TRADE_EXECUTIONS_FILE, JSON.stringify(logs, null, 2));
+        await broadcastTradeUpdate(entry);
+        return true;
+    });
+}
 
-        if (entry.decisionStatus === 'executed') {
-            console.log(`💾 Saved executed trade: ${entry.id}`);
-        } else if (entry.decisionStatus === 'skipped') {
-            console.log(`💾 Saved skipped decision: ${entry.id}`);
-        } else {
-            console.log(`💾 Saved invalid decision: ${entry.id}`);
+async function setupEnvironment() {
+    try {
+        if (!existsSync(LOGS_DIR)) {
+            await mkdir(LOGS_DIR, { recursive: true });
         }
 
-        return true;
+        const files = [
+            { path: PRICE_DETECTION_FILE, default: '[]' },
+            { path: TRADE_EXECUTIONS_FILE, default: '[]' },
+            { path: PROCESSED_FILE, default: '[]' }
+        ];
+
+        for (const { path: filePath, default: defaultContent } of files) {
+            if (!existsSync(filePath)) {
+                await writeFile(filePath, defaultContent, 'utf-8');
+            } else {
+                try {
+                    const content = await readFile(filePath, 'utf-8');
+                    if (!content.trim()) await writeFile(filePath, defaultContent, 'utf-8');
+                } catch {
+                    await writeFile(filePath, defaultContent, 'utf-8');
+                }
+            }
+        }
+
+        executorContract = new ethers.Contract(
+            CONFIG.executorAddress,
+            [
+                "function executeTrade(bool buyVolatile, uint256 amountIn, uint256 minAmountOut)",
+                "function stableToken() view returns (address)",
+                "function volatileToken() view returns (address)",
+                "function exchange() view returns (address)"
+            ],
+            wallet
+        );
     } catch (error) {
-        console.error('❌ Failed to log trade execution:', error);
-        return false;
+        logger.error('❌ Environment setup failed:', error);
+        throw error;
     }
 }
 
-// Ensure contract has sufficient funds
 async function ensureContractFunds() {
     try {
-        // Use standard ERC20 ABI to check balances
-        const stableMock = require('../app/abis/MockStable.json');
-        const stableTokenContract = new ethers.Contract(
-            CONFIG.stableToken,
-            stableMock,
-            provider
-        );
+        const stableAddress = await executorContract.stableToken();
+        const volatileAddress = await executorContract.volatileToken();
 
-        const volatileMock = require('../app/abis/MockVolatile.json');
-
-        const volatileTokenContract = new ethers.Contract(
-            CONFIG.volatileToken,
-            volatileMock,
-            provider
-        );
-
-        const stableDecimals = await stableTokenContract.decimals();
-        const volatileDecimals = await volatileTokenContract.decimals();
-
-        const stableBalance = await stableTokenContract.balanceOf(CONFIG.executorAddress);
-        const volatileBalance = await volatileTokenContract.balanceOf(CONFIG.executorAddress);
-
-        // Format balances for display
-        const formattedStableBalance = ethers.utils.formatUnits(stableBalance, stableDecimals);
-        const formattedVolatileBalance = ethers.utils.formatUnits(volatileBalance, volatileDecimals);
-
-        console.log(`💰 Contract Balances: 
-  Stable: ${formattedStableBalance} (Min: ${CONFIG.minContractBalance})
-  Volatile: ${formattedVolatileBalance} (Min: ${CONFIG.minContractBalance})`);
-
-        // Transfer tokens if below threshold
-        const transferToken = async (tokenAddress: string, amount: string, decimals: number) => {
-            const tokenContract = new ethers.Contract(
-                tokenAddress,
-                ['function transfer(address,uint256) returns(bool)'],
-                wallet
-            );
-
-            const amountWei = ethers.utils.parseUnits(amount, decimals);
-            console.log(`⏳ Transferring ${amount} tokens to executor...`);
-            const tx = await tokenContract.transfer(CONFIG.executorAddress, amountWei);
-            await tx.wait();
-            console.log(`✅ Transferred ${amount} tokens to executor. TX: ${tx.hash}`);
-        };
-
-        // Only transfer if below threshold
-        const minStable = ethers.utils.parseUnits(CONFIG.minContractBalance, stableDecimals);
-        if (stableBalance.lt(minStable)) {
-            const transferAmount = (minStable.sub(stableBalance)).add(ethers.utils.parseUnits('10', stableDecimals));
-            await transferToken(
-                CONFIG.stableToken,
-                ethers.utils.formatUnits(transferAmount, stableDecimals),
-                stableDecimals
-            );
-        }
-
-        // Only transfer if below threshold
-        const minVolatile = ethers.utils.parseUnits(CONFIG.minContractBalance, volatileDecimals);
-        if (volatileBalance.lt(minVolatile)) {
-            const transferAmount = minVolatile.sub(volatileBalance).add(ethers.utils.parseUnits('10', volatileDecimals));
-            await transferToken(
-                CONFIG.volatileToken,
-                ethers.utils.formatUnits(transferAmount, volatileDecimals),
-                volatileDecimals
-            );
-        }
-    } catch (error) {
-        console.error('❌ Contract fund check failed:', error);
-    }
-}
-
-async function simulateTrade(
-    tokenIn: string,
-    tokenOut: string,
-    amountIn: ethers.BigNumber
-): Promise<ethers.BigNumber> {
-    try {
-        // Get exchange address from executor
-        const executorAbi = require('../app/abis/TradeExecutor.json');
-        const ExchangeAbi = require('../app/abis/Exchange.json');
-        const executor = new ethers.Contract(CONFIG.executorAddress, executorAbi, provider);
-        const exchangeAddress = await executor.exchange();
-
-        // Get quote from exchange
-        const exchange = new ethers.Contract(exchangeAddress, ExchangeAbi, provider);
-        const amountOut = await exchange.getQuote(tokenIn, tokenOut, amountIn);
-
-        return amountOut;
-    } catch (error) {
-        console.error('❌ Trade simulation failed:', error);
-        return ethers.BigNumber.from(0);
-    }
-}
-
-
-// Calculate minAmountOut with slippage
-function calculateMinAmountOut(amountOut: ethers.BigNumber, slippagePercent: number): ethers.BigNumber {
-    const slippageFactor = 100 - slippagePercent;
-    return amountOut.mul(slippageFactor).div(100);
-}
-
-
-// Updated executeOnChainTrade function
-async function executeOnChainTrade(
-    decision: TradingDecision,
-    source: 'venice' | 'price-trigger',
-    sourceLogId: string
-): Promise<TradeExecutionLog> {
-    try {
-        // Validate decision
-        if (!decision || !['buy', 'sell'].includes(decision.decision)) {
-            throw new Error(`Invalid trading decision: ${decision?.decision}`);
-        }
-
-        // Load TradeExecutor ABI
-        const executorAbi = require('../app/abis/TradeExecutor.json');
-
-        const executor = new ethers.Contract(
-            CONFIG.executorAddress,
-            executorAbi,
+        const stableToken = new ethers.Contract(
+            stableAddress,
+            ["function balanceOf(address) view returns (uint256)", "function transfer(address,uint256)", "function decimals() view returns (uint8)"],
             wallet
         );
 
-        // Determine trade parameters
-        const buyVolatile = decision.decision === 'buy';
-        const tokenIn = buyVolatile ? CONFIG.stableToken : CONFIG.volatileToken;
-        const tokenOut = buyVolatile ? CONFIG.volatileToken : CONFIG.stableToken;
+        const volatileToken = new ethers.Contract(
+            volatileAddress,
+            ["function balanceOf(address) view returns (uint256)", "function transfer(address,uint256)", "function decimals() view returns (uint8)"],
+            wallet
+        );
 
-        // Get token decimals
-        const erc20Abi = ["function decimals() view returns (uint8)"];
-        const tokenInContract = new ethers.Contract(tokenIn, erc20Abi, provider);
-        const tokenOutContract = new ethers.Contract(tokenOut, erc20Abi, provider);
-        const tokenInDecimals = await tokenInContract.decimals();
-        const tokenOutDecimals = await tokenOutContract.decimals();
+        const [stableDecimals, volatileDecimals] = await Promise.all([
+            stableToken.decimals(),
+            volatileToken.decimals()
+        ]);
 
-        // Validate and set amount
-        let amount = decision.amount || CONFIG.defaultAmount;
-        let amountNum = parseFloat(amount);
-        if (isNaN(amountNum)) {
-            console.warn(`⚠️ Invalid amount: ${amount}, using default`);
-            amount = CONFIG.defaultAmount;
-            amountNum = parseFloat(CONFIG.defaultAmount);
-        }
-        if (amountNum <= 0) {
-            console.warn(`⚠️ Non-positive amount: ${amount}, using default`);
-            amount = CONFIG.defaultAmount;
-            amountNum = parseFloat(CONFIG.defaultAmount);
-        }
-        const amountIn = ethers.utils.parseUnits(amount, tokenInDecimals);
+        const minStable = ethers.utils.parseUnits(CONFIG.minContractBalance, stableDecimals);
+        const minVolatile = ethers.utils.parseUnits(CONFIG.minContractBalance, volatileDecimals);
 
-        // Simulate trade to get expected output
-        const exchangeAddress = await executor.exchange();
-        const exchangeAbi = require('../app/abis/Exchange.json');
+        const [stableBalance, volatileBalance] = await Promise.all([
+            stableToken.balanceOf(CONFIG.executorAddress),
+            volatileToken.balanceOf(CONFIG.executorAddress)
+        ]);
 
-        const exchange = new ethers.Contract(exchangeAddress, exchangeAbi, provider);
-        const expectedAmountOut = await exchange.calculateTradeOutput(buyVolatile, amountIn);
+        logger.info(`Stable balance: ${ethers.utils.formatUnits(stableBalance, stableDecimals)}`);
+        logger.info(`Volatile balance: ${ethers.utils.formatUnits(volatileBalance, volatileDecimals)}`);
 
-        // Calculate minAmountOut with slippage
-        const slippage = decision.slippage || CONFIG.slippagePercent;
-        const minAmountOut = expectedAmountOut
-            .mul(100 - slippage)
-            .div(100);
-
-        console.log(`⚡ Executing ${buyVolatile ? 'BUY' : 'SELL'} trade:`);
-        console.log(`  From: ${tokenIn} (${amount} tokens)`);
-        console.log(`  To:   ${tokenOut}`);
-        console.log(`  Amount In: ${ethers.utils.formatUnits(amountIn, tokenInDecimals)} tokens`);
-        console.log(`  Expected Out: ${ethers.utils.formatUnits(expectedAmountOut, tokenOutDecimals)} tokens`);
-        console.log(`  Min Out: ${ethers.utils.formatUnits(minAmountOut, tokenOutDecimals)} tokens (slippage: ${slippage}%)`);
-
-        // Execute trade
-        console.log('🚀 Executing trade...');
-        const tx = await executor.executeTrade(buyVolatile, amountIn, minAmountOut, {
-            gasLimit: 300000,
-            gasPrice: ethers.BigNumber.from(CONFIG.maxGasPrice)
-        });
-
-        const receipt = await tx.wait();
-        console.log(`✅ Trade executed! TX hash: ${receipt.transactionHash}`);
-
-        // Parse actual amount out from event
-        let actualAmountOut = ethers.BigNumber.from(0);
-        const tradeEvent = receipt.events?.find((e: any) => e.event === 'TradeExecuted');
-        if (tradeEvent) {
-            actualAmountOut = tradeEvent.args.amountOut;
-            console.log(`🔄 Actual Output: ${ethers.utils.formatUnits(actualAmountOut, tokenOutDecimals)} tokens`);
+        // Fund stable token if needed
+        if (stableBalance.lt(minStable)) {
+            const transferAmount = minStable.sub(stableBalance);
+            logger.info(`⚡ Transferring ${ethers.utils.formatUnits(transferAmount, stableDecimals)} stable tokens`);
+            const tx = await stableToken.transfer(CONFIG.executorAddress, transferAmount);
+            await tx.wait();
         }
 
-        const executionLog: TradeExecutionLog = {
-            source: 'trade-execution',
-            id: `exec-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            sourceLogId,
-            sourceType: source,
-            decision: JSON.stringify(decision),
-            decisionLength: decision.decision.length,
-            status: 'completed',
-            createdAt: new Date().toISOString(),
-            txHash: receipt.transactionHash,
-            blockNumber: receipt.blockNumber,
-            amountIn: amountIn.toString(),
-            tokenIn,
-            tokenOut,
-            minAmountOut: minAmountOut.toString(),
-            actualAmountOut: actualAmountOut.toString(),
-            gasUsed: receipt.gasUsed.toString(),
-            decisionStatus: 'executed'
-        };
-
-        await logTradeExecution(executionLog);
-        return executionLog;
-
-    } catch (error: any) {
-        console.error(`❌ Trade execution failed:`, error);
-
-        const executionLog: TradeExecutionLog = {
-            source: 'trade-execution',
-            id: `exec-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            sourceLogId,
-            sourceType: source,
-            decision: JSON.stringify(decision),
-            decisionLength: decision.decision?.length || 0,
-            status: 'failed',
-            createdAt: new Date().toISOString(),
-            error: error.message || 'Unknown error',
-            amountIn: '0',
-            tokenIn: decision.tokenIn || (decision.decision === 'buy' ? CONFIG.stableToken : CONFIG.volatileToken),
-            tokenOut: decision.tokenOut || (decision.decision === 'buy' ? CONFIG.volatileToken : CONFIG.stableToken),
-            minAmountOut: '0',
-            decisionStatus: 'executed'
-        };
-
-        await logTradeExecution(executionLog);
-        return executionLog;
-    }
-}
-
-// Update log file with new entry
-async function updateLogFile<T extends LogEntry>(filePath: string, log: T) {
-    try {
-        const logsContent = await readFile(filePath, 'utf-8');
-        const logs: T[] = JSON.parse(logsContent);
-        const index = logs.findIndex(l => l.id === log.id);
-
-        if (index !== -1) {
-            logs[index] = log;
-            await writeFile(filePath, JSON.stringify(logs, null, 2));
-            console.log(`📝 Updated ${path.basename(filePath)}: ${log.id}`);
-            return true;
+        // Fund volatile token if needed
+        if (volatileBalance.lt(minVolatile)) {
+            const transferAmount = minVolatile.sub(volatileBalance);
+            logger.info(`⚡ Transferring ${ethers.utils.formatUnits(transferAmount, volatileDecimals)} volatile tokens`);
+            const tx = await volatileToken.transfer(CONFIG.executorAddress, transferAmount);
+            await tx.wait();
         }
+
+        logger.info('✅ Contract funds ensured');
     } catch (error) {
-        console.error(`❌ Failed to update log file: ${path.basename(filePath)}`, error);
+        logger.error('❌ Contract fund check failed:', error);
     }
-    return false;
 }
 
-// Load logs with validation
-async function loadLogsWithValidation<T extends LogEntry>(filePath: string): Promise<T[]> {
+function calculateMinAmountOut(
+    expectedOutput: ethers.BigNumber,
+    slippage: number = CONFIG.slippagePercent
+): ethers.BigNumber {
+    const slippageBasisPoints = Math.floor(slippage * 100);
+    const factor = 10000 - slippageBasisPoints;
+    return expectedOutput.mul(factor).div(10000);
+}
+
+function calculateOutputWithFees(
+    amountIn: ethers.BigNumber,
+    reserveIn: ethers.BigNumber,
+    reserveOut: ethers.BigNumber
+): ethers.BigNumber {
+    const amountInWithFee = amountIn.mul(997);
+    const numerator = amountInWithFee.mul(reserveOut);
+    const denominator = reserveIn.mul(1000).add(amountInWithFee);
+    return numerator.div(denominator);
+}
+
+async function executeTrade(
+    decision: TradingDecision,
+    sourceLogId: string
+) {
+    if (!['buy', 'sell'].includes(decision.decision)) {
+        throw new Error(`Invalid trading decision: ${decision.decision}`);
+    }
+
+    const stableAddress = await executorContract.stableToken();
+    const volatileAddress = await executorContract.volatileToken();
+    const exchangeAddress = await executorContract.exchange();
+
+    const exchangeContract = new ethers.Contract(
+        exchangeAddress,
+        ['function getReserves() view returns (uint112, uint112)'],
+        provider
+    );
+
+    const buyVolatile = decision.decision === 'buy';
+    const tokenInAddress = buyVolatile ? stableAddress : volatileAddress;
+
+    const tokenInContract = new ethers.Contract(
+        tokenInAddress,
+        [
+            'function decimals() view returns (uint8)',
+            'function balanceOf(address) view returns (uint256)',
+            'function allowance(address,address) view returns (uint256)',
+            'function approve(address,uint256) returns (bool)'
+        ],
+        wallet
+    );
+
+    const tokenInDecimals = await tokenInContract.decimals();
+    const amountIn = ethers.utils.parseUnits(decision.amount, tokenInDecimals);
+
+    // 1. Check token balance
+    const balance = await tokenInContract.balanceOf(CONFIG.executorAddress);
+    if (balance.lt(amountIn)) {
+        throw new Error(`Insufficient balance: ${ethers.utils.formatUnits(balance, tokenInDecimals)} < ${decision.amount}`);
+    }
+
+    // 2. Check and set allowance
+    const allowance = await tokenInContract.allowance(CONFIG.executorAddress, exchangeAddress);
+    if (allowance.lt(amountIn)) {
+        logger.info('⚠️ Increasing allowance...');
+        const approveTx = await tokenInContract.approve(exchangeAddress, ethers.constants.MaxUint256);
+        await approveTx.wait();
+    }
+
+    // 3. Get reserves and calculate expected output with fees
+    const [reserve0, reserve1] = await exchangeContract.getReserves();
+    const stableReserve = buyVolatile ? reserve0 : reserve1;
+    const volatileReserve = buyVolatile ? reserve1 : reserve0;
+
+    // Use fee-adjusted calculation
+    const expectedOutput = buyVolatile
+        ? calculateOutputWithFees(amountIn, stableReserve, volatileReserve)
+        : calculateOutputWithFees(amountIn, volatileReserve, stableReserve);
+
+    // 4. Price impact check (max 5%)
+    const priceImpact = buyVolatile
+        ? amountIn.div(stableReserve.add(amountIn))
+        : amountIn.div(volatileReserve.add(amountIn));
+
+    if (priceImpact.gt(ethers.utils.parseUnits('0.05', 18))) {
+        throw new Error(`Price impact too high: ${ethers.utils.formatUnits(priceImpact.mul(100), 16)}%`);
+    }
+
+    // Dynamic slippage adjustment
+    let slippage = decision.slippage || CONFIG.slippagePercent;
+    let minAmountOut = calculateMinAmountOut(expectedOutput, slippage);
+    let simulationSuccess = false;
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    while (!simulationSuccess && attempts < maxAttempts) {
+        try {
+            logger.info(`🔍 Simulating trade (attempt ${attempts + 1}) with slippage: ${slippage}%...`);
+
+            // Get fresh reserves for each attempt
+            const [newReserve0, newReserve1] = await exchangeContract.getReserves();
+            const newStableReserve = buyVolatile ? newReserve0 : newReserve1;
+            const newVolatileReserve = buyVolatile ? newReserve1 : newReserve0;
+
+            const freshExpectedOutput = buyVolatile
+                ? calculateOutputWithFees(amountIn, newStableReserve, newVolatileReserve)
+                : calculateOutputWithFees(amountIn, newVolatileReserve, newStableReserve);
+
+            minAmountOut = calculateMinAmountOut(freshExpectedOutput, slippage);
+
+            // Estimate gas cost
+            const gasEstimate = await executorContract.estimateGas.executeTrade(
+                buyVolatile,
+                amountIn,
+                minAmountOut,
+                { from: wallet.address }
+            );
+
+            // Add 20% buffer
+            const gasLimit = gasEstimate.mul(120).div(100);
+
+            await executorContract.callStatic.executeTrade(
+                buyVolatile,
+                amountIn,
+                minAmountOut,
+                { gasLimit }
+            );
+            simulationSuccess = true;
+        } catch (simError) {
+            attempts++;
+            if (attempts >= maxAttempts) {
+                let reason = 'Unknown error';
+                if (typeof simError === 'object' && simError !== null) {
+                    if ('reason' in simError) reason = (simError as any).reason;
+                    else if ('message' in simError) reason = (simError as any).message;
+                }
+                throw new Error(`Trade simulation failed: ${reason}`);
+            }
+
+            // Increase slippage for next attempt
+            slippage += 1;
+            logger.warn(`⚠️ Simulation failed, increasing slippage to ${slippage}%`);
+        }
+    }
+
+    // 5. Execute actual trade
+    logger.info(`🏁 Executing trade with slippage: ${slippage}%`);
+    const txResponse = await executorContract.executeTrade(
+        buyVolatile,
+        amountIn,
+        minAmountOut,
+        { gasLimit: 1500000 }
+    );
+
+    const receipt = await txResponse.wait();
+    let actualAmountOut = '0';
+
+    const tradeEvent = receipt.events?.find((e: any) => e.event === 'TradeExecuted');
+    if (tradeEvent) {
+        actualAmountOut = tradeEvent.args.amountOut.toString();
+    }
+
+    const tokenOutAddress = buyVolatile ? volatileAddress : stableAddress;
+    const tokenOutContract = new ethers.Contract(
+        tokenOutAddress,
+        ['function decimals() view returns (uint8)'],
+        provider
+    );
+    const tokenOutDecimals = await tokenOutContract.decimals();
+
+    return {
+        txHash: txResponse.hash,
+        amountIn: amountIn.toString(),
+        minAmountOut: minAmountOut.toString(),
+        actualAmountOut,
+        gasUsed: receipt.gasUsed.toString(),
+        tokenInDecimals,
+        tokenOutDecimals
+    };
+}
+
+// ======================
+// Logging Utilities
+// ======================
+async function withFileLock<T>(filePath: string, operation: (content: string) => Promise<T>): Promise<T> {
+    const release = await lock(filePath, { retries: 5 });
     try {
-        const content = await readFile(filePath, 'utf-8');
-        return JSON.parse(content) as T[];
-    } catch (error) {
-        console.error(`❌ Failed to load logs from ${path.basename(filePath)}:`, error);
-        return [];
+        const content = existsSync(filePath) ? await readFile(filePath, 'utf-8') : '';
+        return await operation(content);
+    } finally {
+        await release();
     }
 }
 
-// Get current FGI for decision enforcement
-async function getCurrentFgi(): Promise<number> {
-    try {
-        const fgiData = await getFearAndGreedIndex();
-        return fgiData.value;
-    } catch (error) {
-        console.error('❌ Failed to get current FGI, using default 50:', error);
-        return 50;
+// ======================
+// Decision Processing
+// ======================
+function validateTradeDecision(decision: TradingDecision): string | null {
+    if (!['buy', 'sell', 'hold'].includes(decision.decision)) {
+        return 'Invalid decision type';
     }
+
+    if (decision.decision === 'hold') return null;
+
+    const validTokens = [
+        CONFIG.stableToken.toLowerCase(),
+        CONFIG.volatileToken.toLowerCase()
+    ];
+
+    if (!validTokens.includes(decision.tokenIn.toLowerCase()) ||
+        !validTokens.includes(decision.tokenOut.toLowerCase())) {
+        return 'Invalid token addresses';
+    }
+
+    const amountNum = parseFloat(decision.amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+        return 'Invalid trade amount';
+    }
+
+    // Minimum trade amount check
+    if (amountNum < parseFloat(CONFIG.minTradeAmount)) {
+        return `Amount too small (min ${CONFIG.minTradeAmount})`;
+    }
+
+    const maxAmount = parseFloat(CONFIG.maxTradeAmount);
+    const confidence = decision.confidence || 'medium';
+    const maxAllowed = confidence === 'high' ? maxAmount :
+        confidence === 'medium' ? maxAmount * 0.75 :
+            maxAmount * 0.5;
+
+    if (amountNum > maxAllowed) {
+        return `Amount exceeds ${maxAllowed} limit for ${confidence} confidence`;
+    }
+
+    return null;
 }
 
-// Process logs from all sources
+function createFallbackDecision(error: string): TradingDecision {
+    return {
+        decision: 'hold',
+        tokenIn: '',
+        tokenOut: '',
+        amount: '0',
+        slippage: 0,
+        reasoning: error || 'Fallback: Could not parse decision',
+        confidence: 'low'
+    };
+}
+
+// ======================
+// Main Processing
+// ======================
 async function processLogs() {
     try {
         await ensureContractFunds();
 
-        const veniceLogs = await loadLogsWithValidation<VeniceLog>(VENICE_LOG_FILE);
-        const priceTriggerLogs = await loadLogsWithValidation<PriceTriggerLog>(PRICE_TRIGGER_LOG_FILE);
+        const priceDetectionLogs = await withFileLock<any[]>(
+            PRICE_DETECTION_FILE,
+            async (content) => content.trim() ? JSON.parse(content) : []
+        );
 
-        let processedIds: Set<string> = new Set();
-        try {
-            const processedContent = await readFile(PROCESSED_FILE, 'utf-8');
-            processedIds = new Set(JSON.parse(processedContent));
-        } catch (error) {
-            console.error('❌ Failed to parse processed file, initializing new one');
-            await writeFile(PROCESSED_FILE, '[]', 'utf-8');
+        const processedIds = await withFileLock<string[]>(
+            PROCESSED_FILE,
+            async (content) => content.trim() ? JSON.parse(content) : []
+        );
+
+        const newLogs = priceDetectionLogs.filter(log =>
+            !processedIds.includes(log.id) &&
+            log.status === 'completed' &&
+            log.decision
+        );
+
+        if (newLogs.length === 0) {
+            logger.info('⏭️ No new logs to process');
+            return;
         }
 
-        console.log(`🔍 Found ${veniceLogs.length} Venice logs, ${priceTriggerLogs.length} Price Trigger logs, ${processedIds.size} processed IDs`);
+        logger.info(`🔍 Found ${newLogs.length} new logs to process`);
 
-        let hasUpdates = false;
-        let processedCount = 0;
-        const currentFgi = await getCurrentFgi();
-
-        // Process Venice logs
-        for (const log of veniceLogs) {
-            if (!log.id || processedIds.has(log.id)) continue;
-
-            console.log(`🔎 Processing Venice log ${log.id} (status: ${log.status})`);
-
-            if (log.status === 'failed' || log.status === 'error') {
-                console.log(`⏩ Skipping - status is '${log.status}'`);
-                processedIds.add(log.id);
-                hasUpdates = true;
-                processedCount++;
-                continue;
-            }
-
-            console.log(`  Decision Content: ${truncateString(log.decision, 200)}`);
-
+        for (const log of newLogs) {
+            logger.info(`🔎 Processing log: ${log.id}`);
             let decision: TradingDecision | null = null;
-            let decisionStatus: 'executed' | 'skipped' | 'invalid' = 'invalid';
-            let skipReason = '';
-            let executionLog: TradeExecutionLog | null = null;
+            let tradeResult = null;
+            let decisionStatus: TradeStatus = 'invalid';
+            let errorMessage = '';
 
             try {
-                decision = extractDecision(log.decision, currentFgi);
+                // Try to parse the decision
+                const parsedDecision: TradingDecision = JSON.parse(log.decision);
+                const validationError = validateTradeDecision(parsedDecision);
 
-                console.log(`  Parsed Decision: ${JSON.stringify(decision, null, 2)}`);
+                if (validationError) {
+                    throw new Error(validationError);
+                }
 
-                if (!decision) {
-                    skipReason = 'invalid decision format';
-                    decisionStatus = 'invalid';
-                } else if (decision.decision === 'hold') {
-                    skipReason = 'hold decision';
+                decision = parsedDecision;
+
+                if (parsedDecision.decision === 'hold') {
                     decisionStatus = 'skipped';
-                } else if (!decision.amount || parseFloat(decision.amount) <= 0) {
-                    skipReason = `invalid amount: ${decision.amount}`;
-                    decisionStatus = 'invalid';
+                    logger.info(`⏭️ Holding for log ${log.id}`);
                 } else {
-                    console.log(`🚀 Executing ${decision.decision} trade from Venice log ${log.id}`);
-                    const tradeResult = await executeOnChainTrade(decision, 'venice', log.id);
-                    decisionStatus = tradeResult.status === 'completed' ? 'executed' : 'invalid';
-
-                    log.txHash = tradeResult.txHash;
-                    log.blockNumber = tradeResult.blockNumber;
-                    log.status = tradeResult.status;
-                    if (tradeResult.error) log.error = tradeResult.error;
-
-                    await updateLogFile(VENICE_LOG_FILE, log);
-                    executionLog = tradeResult;
+                    logger.info(`🏁 Executing trade: ${parsedDecision.decision} ${parsedDecision.amount}`);
+                    tradeResult = await executeTrade(parsedDecision, log.id);
+                    decisionStatus = 'executed';
+                    logger.info(`✅ Trade executed for log ${log.id}`);
                 }
             } catch (error) {
-                console.error(`❌ Venice trade processing failed:`, error);
-                skipReason = error instanceof Error ? error.message : 'Unknown error';
-                decisionStatus = 'invalid';
+                // Enhanced error handling
+                if (error instanceof Error) {
+                    errorMessage = `${error.message}`;
+                } else if (typeof error === 'string') {
+                    errorMessage = error;
+                } else if (error && typeof error === 'object' && 'reason' in error) {
+                    errorMessage = typeof (error as any).reason === 'string' ?
+                        (error as any).reason :
+                        JSON.stringify((error as any).reason);
+                } else {
+                    errorMessage = JSON.stringify(error);
+                }
+
+                logger.error(`❌❌❌ CRITICAL ERROR processing log ${log.id}: ${errorMessage}`);
+
+                // Create fallback decision if parsing failed
+                if (!decision) {
+                    decision = createFallbackDecision(errorMessage);
+                }
             }
 
             const tradeLog: TradeExecutionLog = {
@@ -508,388 +620,81 @@ async function processLogs() {
                 id: `exec-${Date.now()}`,
                 timestamp: new Date().toISOString(),
                 sourceLogId: log.id,
-                sourceType: 'venice',
-                decision: JSON.stringify(decision || log.decision),
-                decisionLength: decision ? decision.decision.length : log.decision.length,
-                status: decisionStatus === 'executed' ? 'completed' : 'failed',
+                sourceType: 'price-detections',
+                decision: decision!, // Now matches the type
+                status: decisionStatus, // Use status directly
                 createdAt: new Date().toISOString(),
-                decisionStatus,
-                amountIn: decision?.amount || '0',
-                tokenIn: decision?.tokenIn || (decision?.decision === 'buy' ? CONFIG.volatileToken : CONFIG.stableToken) || '',
-                tokenOut: decision?.tokenOut || (decision?.decision === 'buy' ? CONFIG.stableToken : CONFIG.volatileToken) || '',
-                minAmountOut: '0',
-                error: skipReason || undefined,
-                txHash: executionLog?.txHash,
-                blockNumber: executionLog?.blockNumber,
-                actualAmountOut: executionLog?.actualAmountOut,
-                gasUsed: executionLog?.gasUsed
+                tokenIn: decision?.tokenIn || '',
+                tokenOut: decision?.tokenOut || '',
+                amount: decision?.amount || '0',
+                tokenInDecimals: tradeResult?.tokenInDecimals || 0,
+                tokenOutDecimals: tradeResult?.tokenOutDecimals || 0,
+                amountIn: tradeResult?.amountIn || '0',
+                minAmountOut: tradeResult?.minAmountOut || '0',
+                actualAmountOut: tradeResult?.actualAmountOut || '0',
+                txHash: tradeResult?.txHash,
+                gasUsed: tradeResult?.gasUsed,
+                error: errorMessage,
+                type: 'trade-execution'
             };
 
             await logTradeExecution(tradeLog);
-            processedIds.add(log.id);
-            hasUpdates = true;
-            processedCount++;
-
-            if (skipReason) {
-                console.log(`⏩ Skipping - ${skipReason}`);
-            }
+            processedIds.push(log.id);
         }
 
-        // Process Price Trigger logs
-        for (const log of priceTriggerLogs) {
-            if (!log.id || processedIds.has(log.id)) continue;
-
-            console.log(`🔎 Processing Price Trigger log ${log.id} (status: ${log.status})`);
-            console.log(`  Spike: ${log.spikePercent}% | FGI: ${log.fgi || 'N/A'} (${log.fgiClassification || 'N/A'})`);
-
-            if (log.status === 'failed' || log.status === 'error') {
-                console.log(`⏩ Skipping - status is '${log.status}'`);
-                processedIds.add(log.id);
-                hasUpdates = true;
-                processedCount++;
-                continue;
-            }
-
-            console.log(`  Decision Content: ${truncateString(log.decision, 200)}`);
-
-            let decision: TradingDecision | null = null;
-            let decisionStatus: 'executed' | 'skipped' | 'invalid' = 'invalid';
-            let skipReason = '';
-            let executionLog: TradeExecutionLog | null = null;
-
-            try {
-                decision = extractDecision(log.decision, log.fgi || currentFgi);
-
-                console.log(`  Parsed Decision: ${JSON.stringify(decision, null, 2)}`);
-
-                if (!decision) {
-                    skipReason = 'invalid decision format';
-                    decisionStatus = 'invalid';
-                } else if (decision.decision === 'hold') {
-                    skipReason = 'hold decision';
-                    decisionStatus = 'skipped';
-                } else if (!decision.amount || parseFloat(decision.amount) <= 0) {
-                    skipReason = `invalid amount: ${decision.amount}`;
-                    decisionStatus = 'invalid';
-                } else {
-                    console.log(`🚀 Executing ${decision.decision} trade from Price Trigger log ${log.id}`);
-                    const tradeResult = await executeOnChainTrade(decision, 'price-trigger', log.id);
-                    decisionStatus = tradeResult.status === 'completed' ? 'executed' : 'invalid';
-
-                    log.txHash = tradeResult.txHash;
-                    log.blockNumber = tradeResult.blockNumber;
-                    log.status = tradeResult.status;
-                    if (tradeResult.error) log.error = tradeResult.error;
-
-                    await updateLogFile(PRICE_TRIGGER_LOG_FILE, log);
-                    executionLog = tradeResult;
-                }
-            } catch (error) {
-                console.error(`❌ Price Trigger trade processing failed:`, error);
-                skipReason = error instanceof Error ? error.message : 'Unknown error';
-                decisionStatus = 'invalid';
-            }
-
-            const tradeLog: TradeExecutionLog = {
-                source: 'trade-execution',
-                id: `exec-${Date.now()}`,
-                timestamp: new Date().toISOString(),
-                sourceLogId: log.id,
-                sourceType: 'price-trigger',
-                decision: JSON.stringify(decision || log.decision),
-                decisionLength: decision ? decision.decision.length : log.decision.length,
-                status: decisionStatus === 'executed' ? 'completed' : 'failed',
-                createdAt: new Date().toISOString(),
-                decisionStatus,
-                amountIn: decision?.amount || '0',
-                tokenIn: decision?.tokenIn || (decision?.decision === 'buy' ? CONFIG.volatileToken : CONFIG.stableToken) || '',
-                tokenOut: decision?.tokenOut || (decision?.decision === 'buy' ? CONFIG.stableToken : CONFIG.volatileToken) || '',
-                minAmountOut: '0',
-                error: skipReason || undefined,
-                txHash: executionLog?.txHash,
-                blockNumber: executionLog?.blockNumber,
-                actualAmountOut: executionLog?.actualAmountOut,
-                gasUsed: executionLog?.gasUsed
-            };
-
-            await logTradeExecution(tradeLog);
-            processedIds.add(log.id);
-            hasUpdates = true;
-            processedCount++;
-
-            if (skipReason) {
-                console.log(`⏩ Skipping - ${skipReason}`);
-            }
-        }
-
-        if (hasUpdates) {
-            await writeFile(PROCESSED_FILE, JSON.stringify([...processedIds], null, 2));
-            console.log(`✅ Processed ${processedCount} new logs`);
-        } else {
-            console.log('⏩ No new logs to process');
-        }
-    } catch (error) {
-        console.error('❌ Log processing failed:', error);
-    }
-}
-
-// Enhanced decision extraction with FGI enforcement
-function extractDecision(decisionStr: string, fgi: number): TradingDecision {
-    // Handle empty or whitespace-only decisions
-    if (!decisionStr || decisionStr.trim() === '') {
-        console.warn('⚠️ Empty decision string, using fallback');
-        return createFallbackDecision(fgi, "Empty decision content");
-    }
-
-    try {
-        const cleanStr = decisionStr
-            .replace(/[\r\n]+/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-
-        let parsedDecision: any = null;
-
-        // Attempt 1: Parse as pure JSON
-        try {
-            parsedDecision = JSON.parse(cleanStr);
-            return enforceDecisionRules(parsedDecision, fgi);
-        } catch (e) {
-            // Not pure JSON, continue
-        }
-
-        // Attempt 2: Extract JSON from text
-        try {
-            const jsonStart = cleanStr.indexOf('{');
-            const jsonEnd = cleanStr.lastIndexOf('}');
-
-            if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
-                const jsonString = cleanStr.substring(jsonStart, jsonEnd + 1);
-                parsedDecision = JSON.parse(jsonString);
-                return enforceDecisionRules(parsedDecision, fgi);
-            }
-        } catch (e) {
-            // Extraction failed, continue
-        }
-
-        // Attempt 3: Parse as key-value pairs
-        try {
-            const decisionMatch = cleanStr.match(/(?:"decision"|decision)\s*:\s*["']?(\w+)["']?/i);
-            if (!decisionMatch) {
-                throw new Error("No decision found in key-value pairs");
-            }
-
-            let decision = decisionMatch[1].toLowerCase() as 'buy' | 'sell' | 'hold' | 'wait';
-            if (!['buy', 'sell', 'hold', 'wait'].includes(decision)) {
-                throw new Error(`Invalid decision: ${decision}`);
-            }
-
-            const tokenInMatch = cleanStr.match(/(?:"tokenIn"|tokenIn)\s*:\s*["']?(\w+)["']?/i);
-            const tokenOutMatch = cleanStr.match(/(?:"tokenOut"|tokenOut)\s*:\s*["']?(\w+)["']?/i);
-            const amountMatch = cleanStr.match(/(?:"amount"|amount)\s*:\s*["']?([\d.]+)["']?/i);
-            const slippageMatch = cleanStr.match(/(?:"slippage"|slippage)\s*:\s*(\d+)/i);
-
-            return enforceDecisionRules({
-                decision,
-                tokenIn: tokenInMatch ? tokenInMatch[1] : undefined,
-                tokenOut: tokenOutMatch ? tokenOutMatch[1] : undefined,
-                amount: amountMatch ? amountMatch[1] : undefined,
-                slippage: slippageMatch ? parseInt(slippageMatch[1]) : undefined
-            }, fgi);
-        } catch (e) {
-            console.warn('Key-value parse error:', e instanceof Error ? e.message : e);
-            return createFallbackDecision(fgi, "Key-value parse error");
-        }
-
-        // Final fallback if all parsing attempts fail
-        console.warn('⚠️ All parsing attempts failed, using fallback');
-        return createFallbackDecision(fgi, "All parsing methods failed");
-    } catch (error) {
-        console.error('❌ Decision extraction failed:', error);
-        return createFallbackDecision(fgi, "Critical extraction error");
-    }
-}
-
-// Enhanced enforceDecisionRules with robust validation
-function enforceDecisionRules(parsed: any, fgi: number, isPriceTrigger: boolean = false): TradingDecision {
-    // Validate basic structure
-    if (typeof parsed !== 'object' || parsed === null) {
-        throw new Error('Invalid decision format: not an object');
-    }
-
-    // Validate decision type
-    if (!parsed.decision || typeof parsed.decision !== 'string') {
-        throw new Error('Missing or invalid decision property');
-    }
-
-    let decision = parsed.decision.toLowerCase() as 'buy' | 'sell' | 'hold' | 'wait';
-    if (!['buy', 'sell', 'hold', 'wait'].includes(decision)) {
-        throw new Error(`Invalid decision value: ${decision}`);
-    }
-
-    if (decision === 'wait' && !isPriceTrigger) {
-        decision = fgi >= 50 ? 'sell' : 'buy';
-        console.log(`⚠️ Overriding 'wait' decision to '${decision}' based on FGI ${fgi}`);
-    }
-
-    // Enforce valid token pairs
-    const isBuy = decision === 'buy';
-    const validTokens = [CONFIG.stableToken, CONFIG.volatileToken];
-
-    let tokenIn = parsed.tokenIn;
-    let tokenOut = parsed.tokenOut;
-
-    if (!tokenIn || !validTokens.includes(tokenIn)) {
-        tokenIn = isBuy ? CONFIG.stableToken : CONFIG.volatileToken;
-    }
-
-    if (!tokenOut || !validTokens.includes(tokenOut)) {
-        tokenOut = isBuy ? CONFIG.volatileToken : CONFIG.stableToken;
-    }
-
-    // Validate amount - ensure it's positive
-    let amount = parsed.amount || CONFIG.defaultAmount;
-    if (typeof amount === 'number') {
-        amount = amount.toString();
-    }
-
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum)) {
-        console.warn(`⚠️ Invalid amount: ${amount}, using default`);
-        amount = CONFIG.defaultAmount;
-    } else if (amountNum <= 0) {
-        console.warn(`⚠️ Non-positive amount: ${amount}, using default`);
-        amount = CONFIG.defaultAmount;
-    }
-
-    // Validate slippage
-    let slippage = parsed.slippage;
-    if (typeof slippage === 'string') {
-        slippage = parseFloat(slippage);
-    }
-
-    if (typeof slippage !== 'number' || isNaN(slippage)) {
-        slippage = CONFIG.slippagePercent;
-    } else {
-        slippage = Math.max(0.1, Math.min(5, slippage)); // Clamp between 0.1-5%
-        if (slippage !== parsed.slippage) {
-            console.warn(`⚠️ Adjusted slippage: ${parsed.slippage}% → ${slippage}%`);
-        }
-    }
-
-    return {
-        decision,
-        tokenIn,
-        tokenOut,
-        amount,
-        slippage
-    };
-}
-
-// Create fallback decision with increased amount
-function createFallbackDecision(fgi: number, reason: string): TradingDecision {
-    console.warn(`🛑 Using fallback decision: ${reason}`);
-    const isSell = fgi >= 55;
-    return {
-        decision: isSell ? 'sell' : 'buy',
-        tokenIn: isSell ? CONFIG.volatileToken : CONFIG.stableToken,
-        tokenOut: isSell ? CONFIG.stableToken : CONFIG.volatileToken,
-        amount: CONFIG.defaultAmount,
-        slippage: CONFIG.slippagePercent
-    };
-}
-
-// Helper function to truncate long strings
-function truncateString(str: string, maxLength: number): string {
-    if (!str) return '""';
-    if (str.length <= maxLength) return `"${str}"`;
-    return `"${str.substring(0, maxLength)}..." (length: ${str.length})`;
-}
-
-// Add this debug function to traderExecutor.ts
-async function debugExchange() {
-    const executorAbi = ["function exchange() view returns (address)"];
-    const executor = new ethers.Contract(CONFIG.executorAddress, executorAbi, provider);
-    const exchangeAddress = await executor.exchange();
-
-    const exchangeAbi = [
-        "function getNormalizedPrice() view returns (uint256)",
-        "function stableReserve() view returns (uint256)",
-        "function volatileReserve() view returns (uint256)",
-        "function stableFeed() view returns (address)",
-        "function volatileFeed() view returns (address)"
-    ];
-
-    const exchange = new ethers.Contract(exchangeAddress, exchangeAbi, provider);
-
-    console.log("🛠️ Exchange Debug:");
-    console.log(`  Address: ${exchangeAddress}`);
-    console.log(`  Stable Reserve: ${await exchange.stableReserve()}`);
-    console.log(`  Volatile Reserve: ${await exchange.volatileReserve()}`);
-    console.log(`  Normalized Price: ${await exchange.getNormalizedPrice()}`);
-    console.log(`  Stable Feed: ${await exchange.stableFeed()}`);
-    console.log(`  Volatile Feed: ${await exchange.volatileFeed()}`);
-}
-
-
-
-// Main application function
-async function main() {
-    try {
-        await setupEnvironment();
-
-        // Initial token transfer to executor
-        await ensureContractFunds();
-
-        const balance = await wallet.getBalance();
-        console.log(`💰 Wallet balance: ${ethers.utils.formatEther(balance)} ETH`);
-
-        // Check if executor contract is deployed
-        const code = await provider.getCode(CONFIG.executorAddress);
-        if (code === '0x') {
-            throw new Error(`❌ No contract deployed at ${CONFIG.executorAddress}`);
-        }
-        console.log(`✅ Contract verified at ${CONFIG.executorAddress}`);
-
-        // Verify contract owner
-        try {
-            const executorAbi = require('../app/abis/TradeExecutor.json');
-            const executor = new ethers.Contract(CONFIG.executorAddress, executorAbi, provider);
-            const owner = await executor.owner();
-            console.log(`🔒 Executor contract owner: ${owner}`);
-            if (owner.toLowerCase() !== wallet.address.toLowerCase()) {
-                console.warn(`⚠️ Warning: Wallet is not the contract owner!`);
-            }
-        } catch (error) {
-            console.error('❌ Failed to connect to executor contract:', error);
-        }
-
-        await processLogs();
-
-        await debugExchange();
-
-        const interval = setInterval(async () => {
-            console.log('\n🔎 Checking for new trading decisions...');
-            await processLogs();
-        }, 15000);
-
-        console.log('🚀 Trade executor started. Listening for decisions...');
-        console.log('============================================================');
-        console.log(`   Executor: ${CONFIG.executorAddress}`);
-        console.log(`   Stable Token:  ${CONFIG.stableToken}`);
-        console.log(`   Volatile Token:  ${CONFIG.volatileToken}`);
-        console.log(`   Wallet:   ${wallet.address}`);
-        console.log('============================================================');
-
-        process.on('SIGINT', () => {
-            clearInterval(interval);
-            console.log('\n🛑 Trade executor stopped');
-            process.exit(0);
+        await withFileLock(PROCESSED_FILE, async () => {
+            await writeFile(PROCESSED_FILE, JSON.stringify(processedIds, null, 2));
         });
+
+        logger.info(`✅ Processed ${newLogs.length} logs`);
     } catch (error) {
-        console.error('❌ Trade executor failed to start:', error);
-        process.exit(1);
+        logger.error('❌❌❌ Log processing failed:', error);
     }
 }
 
-// Start the application
-main().catch(console.error);
+// ======================
+// Main Application
+// ======================
+async function main() {
+    logger.info('🚀 Starting Trade Executor');
+    await setupEnvironment();
+
+    // Setup WebSocket server
+    const wss = await setupWebSocketServer();
+    connectToWebSocketServer();
+
+    const code = await provider.getCode(CONFIG.executorAddress);
+    if (code === '0x') {
+        throw new Error(`❌ No contract at ${CONFIG.executorAddress}`);
+    }
+
+    // Initial processing
+    await processLogs();
+
+    // Periodic processing
+    const interval = setInterval(async () => {
+        logger.info('\n🔄 Periodic log check');
+        await new Promise(resolve => setTimeout(resolve, CONFIG.processingDelay));
+        await processLogs();
+    }, 15000);
+
+    process.on('SIGINT', async () => {
+        clearInterval(interval);
+        if (wsClient) {
+            wsClient.close();
+        }
+        if (wss) {
+            wss.close();
+        }
+        if (allocatedWsPort) {
+            releasePort(allocatedWsPort);
+        }
+        logger.info('\n🛑 Trade executor stopped');
+        process.exit(0);
+    });
+}
+
+main().catch(err => {
+    logger.error('Fatal error in trade executor:', err);
+    process.exit(1);
+});

@@ -1,0 +1,865 @@
+[
+  {
+    "logId": "spike-1751158146092",
+    "rawDecision": "{\"decision\":\"buy\",\"tokenIn\":\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\"tokenOut\":\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\"amount\":\"0.025\",\"slippage\":1,\"reasoning\":\"Bullish OBV trend with 10.88% price spike and extreme volatility\",\"confidence\":\"high\"}",
+    "originalParsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish OBV trend with 10.88% price spike and extreme volatility",
+      "confidence": "high"
+    },
+    "extractedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish OBV trend with 10.88% price spike and extreme volatility",
+      "confidence": "high"
+    },
+    "errors": [],
+    "timestamp": "2025-06-29T00:49:24.330Z"
+  },
+  {
+    "logId": "spike-1751152783089",
+    "rawDecision": "{\"decision\":\"buy\",\"tokenIn\":\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\"tokenOut\":\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\"amount\":\"0.025\",\"slippage\":1,\"reasoning\":\"Bullish indicators with volume confirmation\",\"confidence\":\"medium\"}",
+    "originalParsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    },
+    "extractedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    },
+    "errors": [],
+    "timestamp": "2025-06-28T23:20:12.903Z"
+  },
+  {
+    "logId": "spike-1751149527124",
+    "rawDecision": "{\"decision\":\"buy\",\"tokenIn\":\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\"tokenOut\":\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\"amount\":\"0.025\",\"slippage\":1,\"reasoning\":\"Bullish indicators with volume confirmation\",\"confidence\":\"medium\"}",
+    "originalParsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    },
+    "extractedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    },
+    "errors": [],
+    "timestamp": "2025-06-28T22:25:55.298Z"
+  },
+  {
+    "logId": "spike-1751149116608",
+    "rawDecision": "{\"decision\":\"buy\",\"tokenIn\":\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\"tokenOut\":\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\"amount\":\"0.025\",\"slippage\":1,\"reasoning\":\"Bullish indicators with volume confirmation\",\"confidence\":\"medium\"}",
+    "originalParsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    },
+    "extractedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    },
+    "errors": [],
+    "timestamp": "2025-06-28T22:18:58.244Z"
+  },
+  {
+    "logId": "spike-1751146746377",
+    "rawDecision": "{\"decision\":\"buy\",\"tokenIn\":\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\"tokenOut\":\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\"amount\":\"0.025\",\"slippage\":1,\"reasoning\":\"Bullish indicators with volume confirmation and extreme price spike up\",\"confidence\":\"high\"}",
+    "originalParsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation and extreme price spike up",
+      "confidence": "high"
+    },
+    "extractedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation and extreme price spike up",
+      "confidence": "high"
+    },
+    "errors": [],
+    "timestamp": "2025-06-28T21:39:20.267Z"
+  },
+  {
+    "logId": "spike-1751145795858",
+    "rawDecision": "{\"decision\":\"buy\",\"tokenIn\":\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\"tokenOut\":\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\"amount\":\"0.025\",\"slippage\":1,\"reasoning\":\"Bullish indicators with volume confirmation\",\"confidence\":\"medium\"}",
+    "originalParsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    },
+    "extractedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    },
+    "errors": [],
+    "timestamp": "2025-06-28T21:23:28.028Z"
+  },
+  {
+    "logId": "spike-1751144311381",
+    "rawDecision": "{\"decision\":\"buy\",\"tokenIn\":\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\"tokenOut\":\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\"amount\":\"0.025\",\"slippage\":1,\"reasoning\":\"Bullish indicators with volume confirmation, price spike up 10.52%\",\"confidence\":\"medium\"}",
+    "originalParsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation, price spike up 10.52%",
+      "confidence": "medium"
+    },
+    "extractedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation, price spike up 10.52%",
+      "confidence": "medium"
+    },
+    "errors": [],
+    "timestamp": "2025-06-28T20:58:50.949Z"
+  },
+  {
+    "logId": "spike-1751137949837",
+    "rawDecision": "{\"decision\":\"buy\",\"tokenIn\":\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\"tokenOut\":\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\"amount\":\"0.025\",\"slippage\":1,\"reasoning\":\"Bullish OBV trend with 10.73% price spike and extreme volatility\",\"confidence\":\"high\"}",
+    "originalParsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish OBV trend with 10.73% price spike and extreme volatility",
+      "confidence": "high"
+    },
+    "extractedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish OBV trend with 10.73% price spike and extreme volatility",
+      "confidence": "high"
+    },
+    "errors": [],
+    "timestamp": "2025-06-28T19:12:42.488Z"
+  },
+  {
+    "logId": "spike-1751137455812",
+    "rawDecision": "{\"decision\":\"buy\",\"tokenIn\":\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\"tokenOut\":\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\"amount\":\"0.025\",\"slippage\":1,\"reasoning\":\"Bullish indicators with volume confirmation\",\"confidence\":\"medium\"}",
+    "originalParsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    },
+    "extractedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    },
+    "errors": [],
+    "timestamp": "2025-06-28T19:12:10.618Z"
+  },
+  {
+    "logId": "spike-1751137093395",
+    "rawDecision": "{\"decision\":\"buy\",\"tokenIn\":\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\"tokenOut\":\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\"amount\":\"0.025\",\"slippage\":1,\"reasoning\":\"Bullish indicators with volume confirmation\",\"confidence\":\"medium\"}",
+    "originalParsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    },
+    "extractedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    },
+    "errors": [],
+    "timestamp": "2025-06-28T19:12:10.371Z"
+  },
+  {
+    "logId": "spike-1751136944053",
+    "rawDecision": "{\"decision\":\"buy\",\"tokenIn\":\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\"tokenOut\":\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\"amount\":\"0.025\",\"slippage\":1,\"reasoning\":\"Bullish indicators with volume confirmation, price spike up 10.72%\",\"confidence\":\"medium\"}",
+    "originalParsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation, price spike up 10.72%",
+      "confidence": "medium"
+    },
+    "extractedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation, price spike up 10.72%",
+      "confidence": "medium"
+    },
+    "errors": [],
+    "timestamp": "2025-06-28T19:12:09.855Z"
+  },
+  {
+    "id": "spike-1751136944053",
+    "timestamp": "2025-06-28T18:55:51.458Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation, price spike up 10.72%\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation, price spike up 10.72%",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751137093395",
+    "timestamp": "2025-06-28T18:58:18.370Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751137455812",
+    "timestamp": "2025-06-28T19:04:21.626Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751137949837",
+    "timestamp": "2025-06-28T19:12:36.120Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish OBV trend with 10.73% price spike and extreme volatility\",\n  \"confidence\": \"high\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish OBV trend with 10.73% price spike and extreme volatility",
+      "confidence": "high"
+    }
+  },
+  {
+    "id": "spike-1751144311381",
+    "timestamp": "2025-06-28T20:58:39.465Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation, price spike up 10.52%\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation, price spike up 10.52%",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751145795858",
+    "timestamp": "2025-06-28T21:23:22.133Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751146746377",
+    "timestamp": "2025-06-28T21:39:16.088Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation and extreme price spike up\",\n  \"confidence\": \"high\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation and extreme price spike up",
+      "confidence": "high"
+    }
+  },
+  {
+    "id": "spike-1751149116608",
+    "timestamp": "2025-06-28T22:18:45.046Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751149527124",
+    "timestamp": "2025-06-28T22:25:30.026Z",
+    "prompt": "{\"system\":\"ROLE: Senior Cryptocurrency Analyst\\n// ... existing content ...\\nCRITICAL OUTPUT REQUIREMENTS:\\n1. After <think> analysis, output ONLY valid JSON\\n2. JSON must:\\n   - Use double quotes for all properties and string values\\n   - Contain these exact properties:\\n        \\\"decision\\\", \\\"tokenIn\\\", \\\"tokenOut\\\", \\\"amount\\\", \\n        \\\"slippage\\\", \\\"reasoning\\\", \\\"confidence\\\"\\n3. Example valid output:\\n<think>\\nMarket shows bullish indicators with rising OBV...\\nRecommend buying with medium confidence.\\n</think>\\n{\\n  \\\"decision\\\": \\\"buy\\\",\\n  \\\"tokenIn\\\": \\\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\\\",\\n  \\\"tokenOut\\\": \\\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\\\",\\n  \\\"amount\\\": \\\"0.025\\\",\\n  \\\"slippage\\\": 1.0,\\n  \\\"reasoning\\\": \\\"Bullish indicators with volume confirmation\\\",\\n  \\\"confidence\\\": \\\"medium\\\"\\n}\",\"instructions\":\"Generate trading recommendation as JSON with these fields:\\n{\\n  \\\"reasoning\\\": \\\"Brief analysis (max 25 words) including confidence level\\\",\\n  \\\"decision\\\": \\\"buy|sell|hold\\\",\\n  \\\"tokenIn\\\": \\\"Token address or 0x0 for hold\\\",\\n  \\\"tokenOut\\\": \\\"Token address or 0x0 for hold\\\",\\n  \\\"amount\\\": \\\"Trade amount in ETH (0 for hold)\\\",\\n  \\\"slippage\\\": 1-3,\\n  \\\"confidence\\\": \\\"high|medium|low\\\"\\n}\\n\\nIMPORTANT: Price spike detected (10.82% up)\",\"token_mapping\":{\"STABLECOIN\":\"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\"VOLATILE\":\"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\"},\"market_context\":{\"current_price\":2438.2516899827297,\"price_change_24h\":-172.09149984552914,\"price_change_percent\":-6.592677181916891,\"fgi\":65,\"fgi_classification\":\"Greed\",\"obv_value\":18935645812.58731,\"obv_trend\":\"bullish\",\"price_event\":{\"type\":\"spike\",\"direction\":\"up\",\"change_percent\":10.82,\"current_price\":2438.25168998,\"previous_price\":2200,\"volatility_level\":\"extreme\"}}}",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "hold",
+      "tokenIn": "0x0000000000000000000000000000000000000000",
+      "tokenOut": "0x0000000000000000000000000000000000000000",
+      "amount": "0",
+      "slippage": 0,
+      "reasoning": "Initial placeholder"
+    }
+  },
+  {
+    "id": "spike-1751152783089",
+    "timestamp": "2025-06-28T23:19:51.746Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751158146092",
+    "timestamp": "2025-06-29T00:49:14.095Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish OBV trend with 10.88% price spike and extreme volatility\",\n  \"confidence\": \"high\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish OBV trend with 10.88% price spike and extreme volatility",
+      "confidence": "high"
+    }
+  },
+  {
+    "id": "spike-1751162143436",
+    "timestamp": "2025-06-29T01:55:52.149Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751165710627",
+    "timestamp": "2025-06-29T02:55:17.695Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751168169950",
+    "timestamp": "2025-06-29T03:36:18.735Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation and extreme price spike\",\n  \"confidence\": \"high\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation and extreme price spike",
+      "confidence": "high"
+    }
+  },
+  {
+    "id": "spike-1751169128184",
+    "timestamp": "2025-06-29T03:52:15.255Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"sell\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 2.0,\n  \"reasoning\": \"Price spike detected (10.54% up) with extreme volatility, bearish OBV trend, high greed factor. High confidence in selling.\",\n  \"confidence\": \"high\"\n}",
+    "parsedDecision": {
+      "decision": "sell",
+      "tokenIn": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "tokenOut": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "amount": "0.025",
+      "slippage": 2,
+      "reasoning": "Price spike detected (10.54% up) with extreme volatility, bearish OBV trend, high greed factor. High confidence in selling.",
+      "confidence": "high"
+    }
+  },
+  {
+    "id": "spike-1751169207131",
+    "timestamp": "2025-06-29T03:53:37.432Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"sell\",\n  \"tokenIn\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"tokenOut\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"amount\": \"0.025\",\n  \"slippage\": 2.0,\n  \"reasoning\": \"Price spike detected with extreme volatility, bearish OBV trend, high risk of reversal\",\n  \"confidence\": \"high\"\n}",
+    "parsedDecision": {
+      "decision": "sell",
+      "tokenIn": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "tokenOut": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "amount": "0.025",
+      "slippage": 2,
+      "reasoning": "Price spike detected with extreme volatility, bearish OBV trend, high risk of reversal",
+      "confidence": "high"
+    }
+  },
+  {
+    "id": "spike-1751169846532",
+    "timestamp": "2025-06-29T04:04:11.565Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"sell\",\n  \"tokenIn\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"tokenOut\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Price spike detected with extreme volatility, bearish OBV trend\",\n  \"confidence\": \"high\"\n}",
+    "parsedDecision": {
+      "decision": "sell",
+      "tokenIn": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "tokenOut": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Price spike detected with extreme volatility, bearish OBV trend",
+      "confidence": "high"
+    }
+  },
+  {
+    "id": "spike-1751170350892",
+    "timestamp": "2025-06-29T04:12:37.109Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation and price spike detected\",\n  \"confidence\": \"high\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation and price spike detected",
+      "confidence": "high"
+    }
+  },
+  {
+    "id": "spike-1751200738807",
+    "timestamp": "2025-06-29T12:39:47.543Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751210579918",
+    "timestamp": "2025-06-29T15:23:12.074Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751211120393",
+    "timestamp": "2025-06-29T15:32:09.538Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751211795842",
+    "timestamp": "2025-06-29T15:43:21.745Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751213762795",
+    "timestamp": "2025-06-29T16:16:10.782Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751214075944",
+    "timestamp": "2025-06-29T16:21:26.711Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation and extreme price spike up 10.8%\",\n  \"confidence\": \"high\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation and extreme price spike up 10.8%",
+      "confidence": "high"
+    }
+  },
+  {
+    "id": "spike-1751215211254",
+    "timestamp": "2025-06-29T16:40:17.111Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"sell\",\n  \"tokenIn\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"tokenOut\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"amount\": \"0.025\",\n  \"slippage\": 2.0,\n  \"reasoning\": \"Price spike detected with extreme volatility and bearish OBV trend\",\n  \"confidence\": \"high\"\n}",
+    "parsedDecision": {
+      "decision": "sell",
+      "tokenIn": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "tokenOut": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "amount": "0.025",
+      "slippage": 2,
+      "reasoning": "Price spike detected with extreme volatility and bearish OBV trend",
+      "confidence": "high"
+    }
+  },
+  {
+    "id": "spike-1751215600712",
+    "timestamp": "2025-06-29T16:46:46.281Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751217756967",
+    "timestamp": "2025-06-29T17:22:43.270Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751223888482",
+    "timestamp": "2025-06-29T19:04:55.573Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751224148964",
+    "timestamp": "2025-06-29T19:09:14.216Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751226212394",
+    "timestamp": "2025-06-29T19:44:02.400Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation and extreme volatility spike\",\n  \"confidence\": \"high\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation and extreme volatility spike",
+      "confidence": "high"
+    }
+  },
+  {
+    "id": "spike-1751226551565",
+    "timestamp": "2025-06-29T19:49:20.283Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751227942111",
+    "timestamp": "2025-06-29T20:12:28.485Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751228853669",
+    "timestamp": "2025-06-29T20:27:40.701Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751232371616",
+    "timestamp": "2025-06-29T21:26:19.495Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751234818916",
+    "timestamp": "2025-06-29T22:07:05.613Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751237066466",
+    "timestamp": "2025-06-29T22:44:32.861Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751238627771",
+    "timestamp": "2025-06-29T23:10:33.197Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751240580824",
+    "timestamp": "2025-06-29T23:43:11.417Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751241542302",
+    "timestamp": "2025-06-29T23:59:07.354Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  },
+  {
+    "id": "spike-1751242621165",
+    "timestamp": "2025-06-30T00:17:07.496Z",
+    "prompt": "",
+    "rawResponse": "{\n  \"decision\": \"buy\",\n  \"tokenIn\": \"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512\",\n  \"tokenOut\": \"0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0\",\n  \"amount\": \"0.025\",\n  \"slippage\": 1.0,\n  \"reasoning\": \"Bullish indicators with volume confirmation\",\n  \"confidence\": \"medium\"\n}",
+    "parsedDecision": {
+      "decision": "buy",
+      "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "amount": "0.025",
+      "slippage": 1,
+      "reasoning": "Bullish indicators with volume confirmation",
+      "confidence": "medium"
+    }
+  }
+]

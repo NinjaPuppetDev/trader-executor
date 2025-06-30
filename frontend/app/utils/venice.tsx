@@ -1,12 +1,25 @@
-// utils/venice.ts
-
 export async function fetchTradingSignal(prompt: string, apiKey: string): Promise<string> {
+  const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+  // Helper function for consistent error responses
+  const createErrorResponse = (reason: string) => JSON.stringify({
+    decision: "hold",
+    reasoning: reason,
+    tokenIn: ZERO_ADDRESS,
+    tokenOut: ZERO_ADDRESS,
+    amount: "0",
+    slippage: 0
+  });
+
+  // Validate API key
   if (!apiKey) {
-    throw new Error("VENICE_API_KEY not set in .env");
+    throw new Error("VENICE_API_KEY not set in environment variables");
   }
 
   try {
-    const response = await fetch("https://api.venice.ai/api/v1/chat/completions", {
+    // Configure API request
+    const apiUrl = "https://api.venice.ai/api/v1/chat/completions";
+    const response = await fetch(apiUrl, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
@@ -15,22 +28,39 @@ export async function fetchTradingSignal(prompt: string, apiKey: string): Promis
       body: JSON.stringify({
         model: "qwen3-4b",
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 512
+        max_tokens: 8192,
+        response_format: { type: "json_object" }
       }),
     });
 
+    // Handle HTTP errors
     if (!response.ok) {
       const errorBody = await response.text();
-      throw new Error(`Venice API error: ${response.status} ${errorBody}`);
+      const status = response.status;
+      throw new Error(`Venice API error (${status}): ${errorBody}`);
     }
 
+    // Process successful response
     const data = await response.json();
-    const content = data.choices[0].message.content;
+    const content = data.choices[0]?.message?.content || "";
 
-    return content;
+    // Validate JSON structure
+    try {
+      const parsed = JSON.parse(content);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return content;
+      }
+      return createErrorResponse("API returned non-object JSON");
+    } catch (jsonError) {
+      return createErrorResponse("API returned invalid JSON format");
+    }
 
-  } catch (err: any) {
-    console.error("❌ Venice fetch error:", err.message || err);
-    throw new Error("Failed to fetch signal from Venice");
+  } catch (error: unknown) {
+    // Handle all possible errors
+    const errorMessage = error instanceof Error
+      ? error.message
+      : "Unknown error occurred";
+    console.error("❌ Venice fetch error:", errorMessage);
+    return createErrorResponse(`Network/API error: ${errorMessage}`);
   }
 }

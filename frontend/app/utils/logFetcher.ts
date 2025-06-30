@@ -1,30 +1,34 @@
-export const fetchAllLogs = async () => {
+type LogApiEndpoint = 'venice' | 'price-detections' | 'trade-execution';
+
+// logFetcher.ts
+export const fetchLogsByType = async (endpoint: LogApiEndpoint) => {
     try {
-        const [veniceRes, priceTriggerRes, tradeExecutionsRes] = await Promise.all([
-            fetch('/api/logs'),
-            fetch('/api/price-trigger-logs'),
-            fetch('/api/trade-executions')
+        // ... existing cache busting logic ...
+        const res = await fetch(`${apiPath}?t=${now}`);
+        const data = await res.json();
+        return Array.isArray(data) ? data : []; // Ensure we always return an array
+    } catch (error) {
+        return []; // Return empty array on error
+    }
+};
+
+export const fetchAllLogs = async () => { // Remove unused parameter
+    try {
+        const [veniceLogs, priceLogs, tradeLogs] = await Promise.all([
+            fetchLogsByType('venice'),
+            fetchLogsByType('price-detections'),
+            fetchLogsByType('trade-execution')
         ]);
 
-        const veniceLogs = await veniceRes.json();
-        const priceTriggerLogs = await priceTriggerRes.json();
-        const tradeExecutions = await tradeExecutionsRes.json();
-
-        // Combine all logs
-        const allLogs = [
-            ...veniceLogs,
-            ...priceTriggerLogs,
-            ...tradeExecutions
-        ];
-
-        // Sort by timestamp
-        allLogs.sort((a, b) =>
+        // Ensure all are arrays before spreading
+        return [
+            ...(Array.isArray(veniceLogs) ? veniceLogs : []),
+            ...(Array.isArray(priceLogs) ? priceLogs : []),
+            ...(Array.isArray(tradeLogs) ? tradeLogs : [])
+        ].sort((a, b) =>
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         );
-
-        return allLogs;
     } catch (error) {
-        console.error('Failed to fetch logs:', error);
-        return [];
+        return []; // Return empty array on error
     }
 };

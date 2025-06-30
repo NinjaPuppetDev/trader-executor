@@ -16,6 +16,11 @@
                 "name": "_cooldownPeriod",
                 "type": "uint256",
                 "internalType": "uint256"
+            },
+            {
+                "name": "_maxDataAge",
+                "type": "uint256",
+                "internalType": "uint256"
             }
         ],
         "stateMutability": "nonpayable"
@@ -46,14 +51,44 @@
     },
     {
         "type": "function",
-        "name": "checkPriceSpike",
-        "inputs": [],
-        "outputs": [],
-        "stateMutability": "nonpayable"
+        "name": "checkUpkeep",
+        "inputs": [
+            {
+                "name": "",
+                "type": "bytes",
+                "internalType": "bytes"
+            }
+        ],
+        "outputs": [
+            {
+                "name": "upkeepNeeded",
+                "type": "bool",
+                "internalType": "bool"
+            },
+            {
+                "name": "",
+                "type": "bytes",
+                "internalType": "bytes"
+            }
+        ],
+        "stateMutability": "view"
     },
     {
         "type": "function",
         "name": "i_cooldownPeriod",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "i_maxDataAge",
         "inputs": [],
         "outputs": [
             {
@@ -105,6 +140,19 @@
     },
     {
         "type": "function",
+        "name": "performUpkeep",
+        "inputs": [
+            {
+                "name": "",
+                "type": "bytes",
+                "internalType": "bytes"
+            }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+    },
+    {
+        "type": "function",
         "name": "priceFeed",
         "inputs": [],
         "outputs": [
@@ -137,19 +185,6 @@
                 "type": "uint256",
                 "indexed": false,
                 "internalType": "uint256"
-            }
-        ],
-        "anonymous": false
-    },
-    {
-        "type": "event",
-        "name": "TradingDecisionGenerated",
-        "inputs": [
-            {
-                "name": "decision",
-                "type": "string",
-                "indexed": false,
-                "internalType": "string"
             }
         ],
         "anonymous": false

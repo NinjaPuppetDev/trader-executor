@@ -43,7 +43,7 @@
                 "internalType": "bool"
             },
             {
-                "name": "amount",
+                "name": "amountIn",
                 "type": "uint256",
                 "internalType": "uint256"
             },
@@ -58,9 +58,14 @@
     },
     {
         "type": "function",
-        "name": "owner",
+        "name": "getTokenAddresses",
         "inputs": [],
         "outputs": [
+            {
+                "name": "",
+                "type": "address",
+                "internalType": "address"
+            },
             {
                 "name": "",
                 "type": "address",
@@ -71,17 +76,16 @@
     },
     {
         "type": "function",
-        "name": "restoreApprovals",
+        "name": "owner",
         "inputs": [],
-        "outputs": [],
-        "stateMutability": "nonpayable"
-    },
-    {
-        "type": "function",
-        "name": "revokeApprovals",
-        "inputs": [],
-        "outputs": [],
-        "stateMutability": "nonpayable"
+        "outputs": [
+            {
+                "name": "",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "stateMutability": "view"
     },
     {
         "type": "function",
@@ -199,15 +203,14 @@
                 "type": "uint256",
                 "indexed": false,
                 "internalType": "uint256"
-            },
-            {
-                "name": "minAmountOut",
-                "type": "uint256",
-                "indexed": false,
-                "internalType": "uint256"
             }
         ],
         "anonymous": false
+    },
+    {
+        "type": "error",
+        "name": "ReentrancyGuardReentrantCall",
+        "inputs": []
     },
     {
         "type": "error",

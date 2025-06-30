@@ -1,128 +1,64 @@
-## Hackathon 
+LOCAL TEST ONLY ANVIL
 
-Enable a better way to power onchain finance or AI.
+Trading can be risky and complex, I believe automation systems can address this while enhancing transparency. The original concept involved connecting an agent to public development databases to trigger signals when changes occur, thereby optimizing resources, preventing bad actors, and building a zero-corruption ecosystem.
 
-Cross chain liquidity, new derivatives or peps porotcol that uses data streams and automation and ccip
 
-elizaOs by category Defi and web3 agents, productivity and operations, muti-agent & orchestration
+Since the initial objective involves complex multi-stakeholder coordination, I simplified the project to a trader executor that maintains the core concept while utilizing blockchain public resources.
 
-actions based on oracles, smart key managment, risk management, swarms of agents that look at proposals, frameworks and benchmarking performance.
 
-## Ideas
-agent that based on a trading signal push a proposal on a dao to place a trade cross chain.
-liquidity is about accumulation and distribution, this is important for the agent to keep liquidity and manage cross chain 
+A **Trader Agent** that:
+1. Activates via **Chainlink Automation** upon detecting price spikes (using Chainlink Price Feeds)
+2. Triggers a **Venice Wrapper API** to execute role-based prompts (configured as a trader executor)
+3. Performs market analysis using:
+   - Fear and Greed Index API
+   - On-Balance Volume (OBV) calculations via CoinGecko API
+4. Executes Buy/Sell/Hold decisions through a **Trader Executor Smart Contract** that:
+   - Generates verifiable randomness via Chainlink VRF
+   - Places exchange trades using Chainlink Price Feeds
+5. Incorporates a **parallel performance watcher** (Google API Wrapper) that:
+   - Analyzes trade results
+   - Provides feedback to reinforce agent learning
 
-Amazon bedrock and amazon bedrock agents is integrated with elizaOs
+### Tech Stack
+- **Smart Contracts**: Foundry
+- **Frontend**: Next.js
+- **Oracle Services**: Chainlink (Automation, VRF, Price Feeds)
 
-3-5 minute video publicly viewable 
-publicly accessible source code
-project description that also covers stack architecture
-optional: link to live deployed demo
+
 
 ## Steps
 
-```
-anvil
-```
-
-
-## DeployVeniceTriggerAutomation
-
-```
-forge script script/DeployVeniceUpkeep.s.sol:DeployVeniceUpkeep   --rpc-url http://127.0.0.1:8545   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --broadcast 
-```
-
-
-## Deploy OrchestratorExecutor
-
-```
-forge script script/DeployOrchestratorExecutor.s.sol:DeployOrchestratorExecutor --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80  --rpc-url http://localhost:8545   --broadcast 
-```
-
-## Run upKeep Listener
-
-```
-cd frontend &&
-npx ts-node --project tsconfig.backend.json backend/veniceListenerMemory.ts
-```
-
-## Run Price Trigger Listener Service
-
-```
-cd frontend &&
-npx ts-node --project tsconfig.backend.json backend/priceTriggerListener.ts
-```
-
-
-## Run Trader Listener Service
-```
-cd frontend &&
-npx ts-node --project tsconfig.backend.json backend/traderExecutor.ts
-```
-
-## run Portfolio Monitor Service
-```
-cd frontend &&
-npx ts-node --project tsconfig.backend.json backend/portfolioMonitorService.ts
-```
-
-
-## Deploy Spike Up
-
-```
-forge script script/SimulateUpSpike.s.sol:SimulateUpSpike --rpc-url http://localhost:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 --broadcast
-```
-## Check Price Down
-
-```
-forge script script/SimulateDownSpike.s.sol:SimulateDownSpike --rpc-url http://localhost:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80  --broadcast
-```
-
-
-
-## Test Upkeep
-
-```
-cast send 0x5FbDB2315678afecb367f032d93F642f64180aa3   "performUpkeep(bytes)" 0x   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80   --rpc-url http://127.0.0.1:8545   --chain-id 31337   --gas-limit 300000
-```
-
-## Deploy Frontend
-
-```
-cd frontend
-npm run dev
-```
 
 ## MAKEFILE
 
-# Run anvil
-
+# -- Deploy Commands --
 anvil
-
-# Full deployment
 
 make deploy
 
-# Run all listeners
+# -- websocket --
 
-make run-upkeep-listener
+make run-trade-ws-server
+
+make run-price-ws-server
+
+
+# -- Services --
+
+make run-upkeep-listener // do not use this soon to be deprecated
 
 make run-price-trigger-listener
 
 make run-trader
 
-# Simulate price spike and check
+make run-portfolio-monitor
 
-make simulate
+make run-trainer
 
-# Test upkeep manually
+make run-price-updater
 
-make test-upkeep
+# -- Development Tools --
 
-# Deploy single component
+make deploy-frontend
 
-make deploy-venice-trigger
 
-# Start trader executor only
-
-make run-trader

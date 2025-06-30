@@ -1,57 +1,91 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.28;
+pragma solidity 0.8.30;
 
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {AutomationCompatibleInterface} from
+    "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
 
-contract PriceTrigger {
+contract PriceTrigger is AutomationCompatibleInterface {
     AggregatorV3Interface public immutable priceFeed;
-    uint256 public immutable i_spikeThreshold; // Basis points (500 = 5%)
-    uint256 public immutable i_cooldownPeriod; // Prevent rapid triggers
+    uint256 public immutable i_spikeThreshold;
+    uint256 public immutable i_cooldownPeriod;
+    uint256 public immutable i_maxDataAge; // Maximum allowed data age (seconds)
 
-    // Track last trigger time per caller
-    mapping(address => uint256) public lastTriggerTime;
+    uint256 public lastTriggerTime;
     int256 public lastPrice;
 
     event PriceSpikeDetected(int256 currentPrice, int256 previousPrice, uint256 changePercent);
-    event TradingDecisionGenerated(string decision);
 
-    constructor(address _priceFeed, uint256 _spikeThreshold, uint256 _cooldownPeriod) {
+    constructor(address _priceFeed, uint256 _spikeThreshold, uint256 _cooldownPeriod, uint256 _maxDataAge) {
         priceFeed = AggregatorV3Interface(_priceFeed);
         i_spikeThreshold = _spikeThreshold;
         i_cooldownPeriod = _cooldownPeriod;
+        i_maxDataAge = _maxDataAge;
 
-        // Initialize last price
-        (, int256 initialPrice,,,) = priceFeed.latestRoundData();
+        // Initialize with freshness checks
+        (uint80 roundId, int256 initialPrice,, uint256 updatedAt, uint80 answeredInRound) = priceFeed.latestRoundData();
+
+        require(answeredInRound >= roundId, "Stale price data");
+        require(block.timestamp - updatedAt <= i_maxDataAge, "Data too old");
+
         lastPrice = initialPrice;
     }
 
-    function checkPriceSpike() external {
-        // Use per-caller cooldown
-        require(block.timestamp >= lastTriggerTime[msg.sender] + i_cooldownPeriod, "Cooldown active");
-        lastTriggerTime[msg.sender] = block.timestamp;
+    function checkUpkeep(bytes calldata /*checkData*/ )
+        external
+        view
+        override
+        returns (bool upkeepNeeded, bytes memory /*performData*/ )
+    {
+        // 1. Check cooldown period
+        bool cooldownPassed = (block.timestamp - lastTriggerTime) >= i_cooldownPeriod;
 
-        // Get current price
-        (, int256 currentPrice,,,) = priceFeed.latestRoundData();
+        // Short-circuit if cooldown not met
+        if (!cooldownPassed) {
+            return (false, "");
+        }
 
-        // Store previous price BEFORE update
+        // 2. Get current price with freshness checks
+        (uint80 roundId, int256 currentPrice,, uint256 updatedAt, uint80 answeredInRound) = priceFeed.latestRoundData();
+
+        // 3. Verify price data freshness
+        if (answeredInRound < roundId || block.timestamp - updatedAt > i_maxDataAge) {
+            return (false, "");
+        }
+
+        // 4. Calculate price change
+        uint256 changePercent = calculateChange(currentPrice, lastPrice);
+
+        // 5. Determine if upkeep needed
+        upkeepNeeded = (changePercent >= i_spikeThreshold);
+        return (upkeepNeeded, "");
+    }
+
+    function performUpkeep(bytes calldata /*performData*/ ) external override {
+        // 1. Verify cooldown period
+        require((block.timestamp - lastTriggerTime) >= i_cooldownPeriod, "Cooldown active");
+
+        // 2. Get and verify current price
+        (uint80 roundId, int256 currentPrice,, uint256 updatedAt, uint80 answeredInRound) = priceFeed.latestRoundData();
+
+        require(answeredInRound >= roundId, "Stale price data");
+        require(block.timestamp - updatedAt <= i_maxDataAge, "Data too old");
+
+        // 3. Update trigger time
+        lastTriggerTime = block.timestamp;
+
+        // 4. Calculate change and trigger event
         int256 previousPrice = lastPrice;
-        lastPrice = currentPrice;
-
-        // Calculate percentage change
         uint256 changePercent = calculateChange(currentPrice, previousPrice);
 
         if (changePercent >= i_spikeThreshold) {
+            lastPrice = currentPrice;
             emit PriceSpikeDetected(currentPrice, previousPrice, changePercent);
-
-            string memory decision = currentPrice > previousPrice ? "sell" : "buy";
-            emit TradingDecisionGenerated(decision);
         }
     }
 
     function calculateChange(int256 current, int256 previous) public pure returns (uint256) {
-        if (previous == 0) {
-            return current == 0 ? 0 : type(uint256).max;
-        }
+        if (previous == 0) return type(uint256).max;
 
         int256 change = current - previous;
         uint256 absChange = change < 0 ? uint256(-change) : uint256(change);

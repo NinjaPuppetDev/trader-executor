@@ -16,7 +16,7 @@ async function main() {
         throw new Error('GEMINI_API_KEY environment variable is not set');
     }
 
-    console.log('🚀 Starting RL Training Monitor');
+    console.log('🚀 Starting Enhanced RL Training Monitor');
     const service = new RLTrainingService(GEMINI_API_KEY, LOGS_DIR);
 
     // Initial training
@@ -29,12 +29,14 @@ async function main() {
     // Handle graceful shutdown
     process.on('SIGINT', async () => {
         console.log('\n🛑 Received SIGINT - Stopping monitor');
+        await service.saveQTable(); // Save RL model before exit
         service.stopWatching();
         exit(0);
     });
 
     process.on('SIGTERM', async () => {
         console.log('\n🛑 Received SIGTERM - Stopping monitor');
+        await service.saveQTable(); // Save RL model before exit
         service.stopWatching();
         exit(0);
     });
@@ -42,6 +44,11 @@ async function main() {
 
 async function runTraining(service: RLTrainingService) {
     try {
+        // First process trades for RL
+        const tradeCount = await service.processRecentTradesForRL();
+        console.log(`📊 Processed ${tradeCount} trades for RL training`);
+
+        // Then generate feedback
         const feedback = await service.generateFeedback();
 
         console.log('\n✅ RL FEEDBACK:');

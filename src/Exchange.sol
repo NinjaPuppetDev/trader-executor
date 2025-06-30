@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.28;
+pragma solidity 0.8.30;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -18,86 +18,110 @@ contract Exchange is ReentrancyGuard {
     AggregatorV3Interface public immutable stableFeed;
     AggregatorV3Interface public immutable volatileFeed;
 
+    // State variables for prices
+    int256 public currentVolatilePrice;
+    int256 public currentStablePrice;
+    uint256 public lastPriceUpdate;
+
     uint8 private constant STABLE_DECIMALS = 6;
     uint8 private constant VOLATILE_DECIMALS = 18;
     uint8 private constant FEED_DECIMALS = 8;
+    uint256 public constant MAX_DATA_AGE = 1 hours;
 
     event LiquidityAdded(address indexed provider, uint256 stableAmount, uint256 volatileAmount);
-    event Swapped(address indexed trader, bool buyVolatile, uint256 amountIn, uint256 amountOut, uint256 minAmountOut);
+    event Swapped(address indexed trader, bool buyVolatile, uint256 amountIn, uint256 amountOut);
+    event PortfolioValueUpdated(uint256 totalValue);
 
     constructor(address _stableToken, address _volatileToken, address _stableFeed, address _volatileFeed) {
         stableToken = IERC20(_stableToken);
         volatileToken = IERC20(_volatileToken);
         stableFeed = AggregatorV3Interface(_stableFeed);
         volatileFeed = AggregatorV3Interface(_volatileFeed);
+        
+        // Get prices first
+        (, int256 stablePrice,,,) = stableFeed.latestRoundData();
+        (, int256 volatilePrice,,,) = volatileFeed.latestRoundData();
+        
+        // Validate prices
+        require(stablePrice > 0, "Invalid initial stable price");
+        require(volatilePrice > 0, "Invalid initial volatile price");
+        
+        // Then update state
+        currentStablePrice = stablePrice;
+        currentVolatilePrice = volatilePrice;
+        lastPriceUpdate = block.timestamp;
     }
 
+
     function addLiquidity(uint256 stableAmount, uint256 volatileAmount) external nonReentrant {
-        // Use SafeERC20 for transfers
         stableToken.safeTransferFrom(msg.sender, address(this), stableAmount);
         volatileToken.safeTransferFrom(msg.sender, address(this), volatileAmount);
 
         stableReserve += stableAmount;
         volatileReserve += volatileAmount;
+
         emit LiquidityAdded(msg.sender, stableAmount, volatileAmount);
+        emit PortfolioValueUpdated(getPortfolioValue());
     }
 
-    function getNormalizedPrice() public view returns (uint256) {
-        (, int256 stablePrice,,,) = stableFeed.latestRoundData();
-        (, int256 volatilePrice,,,) = volatileFeed.latestRoundData();
+    // Proper decimal scaling for portfolio valuation
+    function getPortfolioValue() public view returns (uint256) {
+        require(block.timestamp - lastPriceUpdate <= MAX_DATA_AGE, "Prices stale");
 
-        uint256 scaledStable = uint256(stablePrice) * (10 ** (18 - FEED_DECIMALS));
-        uint256 scaledVolatile = uint256(volatilePrice) * (10 ** (18 - FEED_DECIMALS));
+        // Convert prices to 18 decimals
+        uint256 scaledStablePrice = uint256(currentStablePrice) * (10 ** (18 - FEED_DECIMALS));
+        uint256 scaledVolatilePrice = uint256(currentVolatilePrice) * (10 ** (18 - FEED_DECIMALS));
 
-        return (scaledVolatile * 1e18) / scaledStable;
+        // Convert reserves to 18 decimals
+        uint256 stableValue = stableReserve * (10 ** (18 - STABLE_DECIMALS)) * scaledStablePrice;
+        uint256 volatileValue = volatileReserve * scaledVolatilePrice;
+
+        // Return total value in stable token terms (18 decimals)
+        return (stableValue + volatileValue) / 1e18;
     }
 
-    function swap(bool buyVolatile, uint256 amountIn, uint256 minAmountOut)
-        external
-        nonReentrant
-        returns (uint256 amountOut)
-    {
+      function swap(bool buyVolatile, uint256 amountIn) external nonReentrant returns (uint256 amountOut) {
         require(amountIn > 0, "Invalid amount");
-        uint256 price = getNormalizedPrice();
 
         if (buyVolatile) {
-            amountOut = (amountIn * 1e18 * 10 ** VOLATILE_DECIMALS) / (price * 10 ** STABLE_DECIMALS);
-
-            require(amountOut >= minAmountOut, "Slippage too high");
-            require(amountOut <= volatileReserve, "Insufficient liquidity");
-
+            amountOut = (amountIn * volatileReserve) / (stableReserve + amountIn);
+            require(amountOut > 0, "Output too small"); // Add this check
             stableReserve += amountIn;
             volatileReserve -= amountOut;
             stableToken.safeTransferFrom(msg.sender, address(this), amountIn);
             volatileToken.safeTransfer(msg.sender, amountOut);
         } else {
-            amountOut = (amountIn * price * 10 ** STABLE_DECIMALS) / (1e18 * 10 ** VOLATILE_DECIMALS);
-
-            require(amountOut >= minAmountOut, "Slippage too high");
-            require(amountOut <= stableReserve, "Insufficient liquidity");
-
+            amountOut = (amountIn * stableReserve) / (volatileReserve + amountIn);
+            require(amountOut > 0, "Output too small"); // Add this check
             volatileReserve += amountIn;
             stableReserve -= amountOut;
             volatileToken.safeTransferFrom(msg.sender, address(this), amountIn);
             stableToken.safeTransfer(msg.sender, amountOut);
         }
 
-        emit Swapped(msg.sender, buyVolatile, amountIn, amountOut, minAmountOut);
+        emit Swapped(msg.sender, buyVolatile, amountIn, amountOut);
+        emit PortfolioValueUpdated(getPortfolioValue());
         return amountOut;
     }
 
-    function getPortfolioValue() public view returns (uint256) {
-        uint256 price = getNormalizedPrice();
-        uint256 stableIn18 = stableReserve * (10 ** (18 - STABLE_DECIMALS));
-        return stableIn18 + (volatileReserve * price) / 1e18;
+    function updateVolatilePrice(int256 _newPrice) external {
+        require(_newPrice > 0, "Invalid price");
+        currentVolatilePrice = _newPrice;
+        lastPriceUpdate = block.timestamp;
     }
 
-    function calculateTradeOutput(bool buyVolatile, uint256 amountIn) public view returns (uint256) {
-        uint256 price = getNormalizedPrice();
-        if (buyVolatile) {
-            return (amountIn * 1e18 * 10 ** VOLATILE_DECIMALS) / (price * 10 ** STABLE_DECIMALS);
-        } else {
-            return (amountIn * price * 10 ** STABLE_DECIMALS) / (1e18 * 10 ** VOLATILE_DECIMALS);
-        }
+    function updateStablePrice(int256 _newPrice) external {
+        require(_newPrice > 0, "Invalid price");
+        currentStablePrice = _newPrice;
+        lastPriceUpdate = block.timestamp;
+    }
+
+    function getReserves() external view returns (uint256 stable, uint256 volatile) {
+        return (stableReserve, volatileReserve);
+    }
+
+    function getReserveBasedPrice() public view returns (uint256) {
+        if (stableReserve == 0 || volatileReserve == 0) return 0;
+        return (stableReserve * 1e18) / volatileReserve;
     }
 }

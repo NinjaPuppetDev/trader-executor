@@ -13,6 +13,7 @@ interface VeniceTraderTabProps {
     tradeExecutions: TradeExecutionLog[];
     loadingLogs: boolean;
     expandedLogId: string | null;
+    updateConnectionStatus: (status: string) => void;
     toggleLogExpansion: (id: string) => void;
     sendPrompt: () => void;
     formatDecision: (decision: string) => string;
@@ -29,6 +30,7 @@ export default function VeniceTraderTab({
     loadingLogs,
     expandedLogId,
     toggleLogExpansion,
+    updateConnectionStatus,
     sendPrompt,
     formatDecision
 }: VeniceTraderTabProps) {
@@ -113,10 +115,14 @@ export default function VeniceTraderTab({
                 </div>
             )}
             <div className="mt-3 text-gray-400 text-xs">
-                Source: {log.source} | ID: {log.id} | Created: {new Date(log.createdAt).toLocaleString()} | Length: {log.decisionLength} chars
+                Source: {log.source} | ID: {log.id} | Created: {new Date(log.createdAt).toLocaleString()} | Length: {log.decision.length} chars
             </div>
         </div>
     );
+
+    // Safely get prompt length using optional chaining and nullish coalescing
+    const promptLength = prompt?.length ?? 0;
+    const safePrompt = prompt || '';
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -128,7 +134,7 @@ export default function VeniceTraderTab({
                         className="w-full bg-gray-800 border border-gray-700 rounded-lg p-4 focus:outline-none focus:ring-2 focus:ring-purple-600 text-gray-100 placeholder-gray-500 transition-colors"
                         rows={6}
                         placeholder="Example: 'Analyze ETH/USD 4-hour chart for potential entry points considering RSI below 30 and MACD crossover'"
-                        value={prompt}
+                        value={safePrompt}
                         onChange={(e) => setPrompt(e.target.value)}
                         onKeyDown={(e) => {
                             if (e.key === "Enter" && !e.shiftKey) {
@@ -138,15 +144,15 @@ export default function VeniceTraderTab({
                         }}
                     />
                     <div className="flex justify-between items-center mt-2 text-sm text-gray-400">
-                        <span>{prompt.length}/1000 characters</span>
+                        <span>{promptLength}/1000 characters</span>
                         <span>Shift+Enter for new line</span>
                     </div>
                 </div>
 
                 <button
                     onClick={sendPrompt}
-                    disabled={loading || !prompt.trim()}
-                    className={`w-full py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center ${loading || !prompt.trim()
+                    disabled={loading || !safePrompt.trim()}
+                    className={`w-full py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center ${loading || !safePrompt.trim()
                         ? 'bg-gray-700 cursor-not-allowed'
                         : 'bg-purple-600 hover:bg-purple-500 active:bg-purple-400'
                         }`}

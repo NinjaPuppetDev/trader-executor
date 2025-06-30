@@ -1,5 +1,4 @@
-# Makefile for Venice Protocol
-.PHONY: all deploy anvil run-* simulate* test-upkeep deploy-frontend clean
+.PHONY: all deploy anvil run-* simulate* test-upkeep deploy-frontend clean run-all stop-all logs tail-all
 
 # Default target
 all: deploy
@@ -8,6 +7,8 @@ all: deploy
 ANVIL_RPC := http://127.0.0.1:8545
 PRIVATE_KEY := 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 VENICE_UPKEEP_ADDR ?= 0x5FbDB2315678afecb367f032d93F642f64180aa3
+SCRIPT_DIR := $(shell pwd)
+LOGS_DIR := logs
 
 # -- Main Commands --
 deploy: deploy-venice-trigger deploy-orchestrator
@@ -26,29 +27,46 @@ deploy-orchestrator:
 
 # -- Services --
 run-upkeep-listener:
+	@echo "Starting upkeep listener..."
 	cd frontend && npx ts-node --project tsconfig.backend.json backend/veniceListenerMemory.ts
 
 run-price-trigger-listener:
+	@echo "Starting price trigger listener..."
 	cd frontend && npx ts-node --project tsconfig.backend.json backend/priceTriggerListener.ts
 
 run-trader run-trader-only:
+	@echo "Starting trader executor..."
 	cd frontend && npx ts-node --project tsconfig.backend.json backend/traderExecutor.ts
 
 run-portfolio-monitor:
+	@echo "Starting portfolio monitor..."
 	cd frontend && npx ts-node --project tsconfig.backend.json backend/portfolioMonitorService.ts
 
 run-trainer:
+	@echo "Starting RL trainer..."
 	cd frontend && npx ts-node --project tsconfig.backend.json backend/runRLTrainingService.ts
+
+run-price-updater:
+	@echo "Starting price updater..."
+	cd frontend && npx ts-node --project tsconfig.backend.json backend/priceUpdaterService.ts
+
+run-trade-ws-server:
+	@echo "Starting Trade Executor WebSocket server..."
+	cd frontend && npx ts-node --project tsconfig.backend.json backend/tradeExecutorWsServer.ts
+
+run-price-ws-server:
+	@echo "Starting Price Trigger WebSocket server..."
+	cd frontend && npx ts-node --project tsconfig.backend.json backend/priceTriggerWsServer.ts
 
 # -- Simulations --
 simulate-up:
-	forge script script/SimulateUpSpike.s.sol:SimulateUpSpike \
+	forge script script/spiketesters/SimulateUpSpike.s.sol:SimulateUpSpike \
 		--rpc-url $(ANVIL_RPC) \
 		--private-key $(PRIVATE_KEY) \
 		--broadcast
 
 simulate-down:
-	forge script script/SimulateDownSpike.s.sol:SimulateDownSpike \
+	forge script script/spiketesters/SimulateDownSpike.s.sol:SimulateDownSpike \
 		--rpc-url $(ANVIL_RPC) \
 		--private-key $(PRIVATE_KEY) \
 		--broadcast
@@ -68,7 +86,10 @@ anvil:
 	anvil
 
 deploy-frontend:
+	@echo "Starting frontend..."
 	cd frontend && npm run dev
 
+
 clean:
-	rm -rf cache out
+	@echo "Cleaning build artifacts..."
+	@forge clean
