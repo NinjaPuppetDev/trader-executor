@@ -35,11 +35,19 @@ contract TestTradeExecutor is Test {
         volatileFeed = new MockAggregatorV3(3000e8);
 
         // Deploy Exchange
-        exchange =
-            new Exchange(address(stableToken), address(volatileToken), address(stableFeed), address(volatileFeed));
+        exchange = new Exchange(
+            address(stableToken),
+            address(volatileToken),
+            address(stableFeed),
+            address(volatileFeed)
+        );
 
         // Deploy TradeExecutor
-        tradeExecutor = new TradeExecutor(address(stableToken), address(volatileToken), address(exchange));
+        tradeExecutor = new TradeExecutor(
+            address(stableToken),
+            address(volatileToken),
+            address(exchange)
+        );
 
         // Fund TradeExecutor
         stableToken.mint(address(tradeExecutor), 10_000 * 10 ** 6);
@@ -151,7 +159,7 @@ contract TestTradeExecutor is Test {
         vm.startPrank(deployer);
         uint256 expectedOut = calculateExpectedOutput(true, TRADE_AMOUNT);
         uint256 minAmountOut = expectedOut + 1; // Set min output higher than expected
-
+        
         vm.expectRevert("Insufficient output amount");
         tradeExecutor.executeTrade(true, TRADE_AMOUNT, minAmountOut);
         vm.stopPrank();
