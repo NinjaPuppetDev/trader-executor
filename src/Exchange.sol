@@ -37,21 +37,20 @@ contract Exchange is ReentrancyGuard {
         volatileToken = IERC20(_volatileToken);
         stableFeed = AggregatorV3Interface(_stableFeed);
         volatileFeed = AggregatorV3Interface(_volatileFeed);
-        
+
         // Get prices first
         (, int256 stablePrice,,,) = stableFeed.latestRoundData();
         (, int256 volatilePrice,,,) = volatileFeed.latestRoundData();
-        
+
         // Validate prices
         require(stablePrice > 0, "Invalid initial stable price");
         require(volatilePrice > 0, "Invalid initial volatile price");
-        
+
         // Then update state
         currentStablePrice = stablePrice;
         currentVolatilePrice = volatilePrice;
         lastPriceUpdate = block.timestamp;
     }
-
 
     function addLiquidity(uint256 stableAmount, uint256 volatileAmount) external nonReentrant {
         stableToken.safeTransferFrom(msg.sender, address(this), stableAmount);
@@ -80,19 +79,19 @@ contract Exchange is ReentrancyGuard {
         return (stableValue + volatileValue) / 1e18;
     }
 
-      function swap(bool buyVolatile, uint256 amountIn) external nonReentrant returns (uint256 amountOut) {
+    function swap(bool buyVolatile, uint256 amountIn) external nonReentrant returns (uint256 amountOut) {
         require(amountIn > 0, "Invalid amount");
 
         if (buyVolatile) {
             amountOut = (amountIn * volatileReserve) / (stableReserve + amountIn);
-            require(amountOut > 0, "Output too small"); // Add this check
+            require(amountOut > 0, "Output too small");
             stableReserve += amountIn;
             volatileReserve -= amountOut;
             stableToken.safeTransferFrom(msg.sender, address(this), amountIn);
             volatileToken.safeTransfer(msg.sender, amountOut);
         } else {
             amountOut = (amountIn * stableReserve) / (volatileReserve + amountIn);
-            require(amountOut > 0, "Output too small"); // Add this check
+            require(amountOut > 0, "Output too small");
             volatileReserve += amountIn;
             stableReserve -= amountOut;
             volatileToken.safeTransferFrom(msg.sender, address(this), amountIn);
