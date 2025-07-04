@@ -149,6 +149,8 @@ app.get('/health', async (_, res) => {
   });
 });
 
+app.options('/health', cors(), (_, res) => res.sendStatus(200));
+
 const server = new ApolloServer({
   schema,
   plugins: [ApolloServerPluginDrainHttpServer({ httpServer })]

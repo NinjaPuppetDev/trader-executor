@@ -3,7 +3,7 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { PriceDetectionLogEntry, isPriceDetectionLog } from './types';
 import LogsTable from './LogsTable';
 import { useTokenMetadata } from '../contexts/TokenMetadataContext';
-import { gql, useQuery, useApolloClient } from '@apollo/client';
+import { gql, useQuery, useApolloClient, ApolloError } from '@apollo/client';
 
 // Utility functions
 const formatDate = (date: Date | string | number) => {
@@ -39,7 +39,6 @@ const GET_PRICE_DETECTIONS = gql`
       decision
       fgi
       fgiClassification
-      reasoning
     }
   }
 `;
@@ -69,8 +68,8 @@ const getTableColumns = (getTokenSymbol: (address: string) => string) => [
         header: "Status",
         accessor: (log: PriceDetectionLogEntry) => (
             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${log.status === 'completed' ? 'bg-green-900/30 text-green-400 border border-green-800' :
-                    log.status === 'failed' ? 'bg-red-900/30 text-red-400 border border-red-800' :
-                        'bg-yellow-900/30 text-yellow-400 border border-yellow-800'
+                log.status === 'failed' ? 'bg-red-900/30 text-red-400 border border-red-800' :
+                    'bg-yellow-900/30 text-yellow-400 border border-yellow-800'
                 }`}>
                 {log.status}
             </span>
@@ -101,45 +100,68 @@ export default function PriceTriggerTab({
     const [priceTriggerLogs, setPriceTriggerLogs] = useState<PriceDetectionLogEntry[]>([]);
     const [lastUpdated, setLastUpdated] = useState(0);
     const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'error'>('disconnected');
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const { getTokenMetadata } = useTokenMetadata();
     const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     // Proper hook usage
     const apolloClient = useApolloClient();
 
+    // Enhanced error handler
+    const handleError = useCallback((error: ApolloError) => {
+        console.error('GraphQL error:', error);
+        setConnectionStatus('error');
+
+        // Extract meaningful error message
+        const messages = error.graphQLErrors?.map(e => e.message) || [];
+        if (error.networkError) {
+            messages.push(`Network error: ${error.networkError.message}`);
+        }
+        if (error.clientErrors?.length) {
+            messages.push(...error.clientErrors.map(e => e.message));
+        }
+
+        setErrorMessage(messages.join('\n') || 'An unknown error occurred');
+    }, []);
+
     // Fetch price detections
-    const { loading, error, refetch } = useQuery(GET_PRICE_DETECTIONS, {
+    const { loading, refetch } = useQuery(GET_PRICE_DETECTIONS, {
         variables: { limit: 50 },
         fetchPolicy: 'network-only',
         onCompleted: (data) => {
             setConnectionStatus('connected');
-            if (data?.recentDetections) {
-                setPriceTriggerLogs(prev => {
-                    const existingLogsMap = new Map(prev.map(log => [log.id, log]));
-                    const newLogs = data.recentDetections.filter(
-                        (newLog: PriceDetectionLogEntry) => !existingLogsMap.has(newLog.id)
-                    );
+            setErrorMessage(null); // Clear previous errors on success
 
-                    if (newLogs.length > 0) {
-                        const mergedLogs = [...newLogs, ...prev]
-                            .sort((a, b) =>
-                                new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-                            )
-                            .slice(0, 50);
-                        return mergedLogs;
-                    }
-                    return prev;
-                });
-                setLastUpdated(Date.now());
+            if (data?.recentDetections) {
+                try {
+                    setPriceTriggerLogs(prev => {
+                        const existingLogsMap = new Map(prev.map(log => [log.id, log]));
+                        const newLogs = data.recentDetections.filter(
+                            (newLog: PriceDetectionLogEntry) => !existingLogsMap.has(newLog.id)
+                        );
+
+                        if (newLogs.length > 0) {
+                            const mergedLogs = [...newLogs, ...prev]
+                                .sort((a, b) =>
+                                    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+                                )
+                                .slice(0, 50);
+                            return mergedLogs;
+                        }
+                        return prev;
+                    });
+                    setLastUpdated(Date.now());
+                } catch (e) {
+                    console.error('Data processing error:', e);
+                    setConnectionStatus('error');
+                    setErrorMessage('Failed to process server response');
+                }
             }
         },
-        onError: (err) => {
-            console.error('GraphQL error:', err);
-            setConnectionStatus('error');
-        }
+        onError: handleError
     });
 
-    // Setup polling
+    // Setup polling with error handling
     useEffect(() => {
         const startPolling = () => {
             if (pollingIntervalRef.current) {
@@ -183,12 +205,19 @@ export default function PriceTriggerTab({
             return JSON.parse(decision);
         } catch {
             try {
+                // Try to extract JSON from the string
                 const jsonMatch = decision.match(/\{[\s\S]*\}/);
                 if (jsonMatch) return JSON.parse(jsonMatch[0]);
+
+                // Try to clean and parse as JSON
+                const cleaned = decision
+                    .replace(/None/g, 'null')
+                    .replace(/'/g, '"');
+                return JSON.parse(cleaned);
             } catch (e) {
                 console.error('Failed to parse decision:', e);
+                return null;
             }
-            return null;
         }
     }, []);
 
@@ -208,6 +237,13 @@ export default function PriceTriggerTab({
         );
     };
 
+    // Reset errors and reconnect
+    const handleRetry = useCallback(() => {
+        setErrorMessage(null);
+        setConnectionStatus('disconnected');
+        refetch();
+    }, [refetch]);
+
     // Loading state
     if (loading && priceTriggerLogs.length === 0) {
         return (
@@ -223,6 +259,24 @@ export default function PriceTriggerTab({
     return (
         <div className="space-y-8">
             {renderConnectionStatus()}
+
+            {/* Error display with retry option */}
+            {errorMessage && (
+                <div className="bg-red-900/50 p-4 rounded-lg border border-red-800">
+                    <div className="flex justify-between items-start mb-2">
+                        <h3 className="text-red-300 font-bold">Connection Error</h3>
+                        <button
+                            onClick={handleRetry}
+                            className="text-xs bg-red-700 hover:bg-red-600 text-white px-3 py-1 rounded transition-colors"
+                        >
+                            Retry
+                        </button>
+                    </div>
+                    <pre className="text-red-200 text-sm overflow-auto max-h-40">
+                        {errorMessage}
+                    </pre>
+                </div>
+            )}
 
             {/* System Status Section */}
             <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
@@ -255,7 +309,7 @@ export default function PriceTriggerTab({
                     <div className="bg-gray-800/30 p-4 rounded-lg border border-gray-700">
                         <h3 className="font-medium text-gray-300 mb-2">System Status</h3>
                         <div className={`flex items-center ${connectionStatus === 'connected' ? 'text-green-400' :
-                                connectionStatus === 'error' ? 'text-red-400' : 'text-yellow-400'
+                            connectionStatus === 'error' ? 'text-red-400' : 'text-yellow-400'
                             }`}>
                             <svg className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -292,11 +346,13 @@ export default function PriceTriggerTab({
 
                 {priceTriggerLogs.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">
-                        {loading ? (
+                        {connectionStatus === 'disconnected' ? (
                             <div className="flex flex-col items-center">
-                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400 mb-2"></div>
-                                Waiting for logs...
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-500 mb-2"></div>
+                                Connecting to server...
                             </div>
+                        ) : connectionStatus === 'error' ? (
+                            <div className="text-red-400">Failed to load logs. Try again.</div>
                         ) : (
                             'No price detection logs found'
                         )}
@@ -310,7 +366,12 @@ export default function PriceTriggerTab({
                         renderExpandedRow={(log) => {
                             if (!isPriceDetectionLog(log)) return null;
 
-                            const decision = log.decision ? parseDecision(log.decision) : null;
+                            let decision = null;
+                            try {
+                                decision = log.decision ? parseDecision(log.decision) : null;
+                            } catch (e) {
+                                console.error('Decision parsing error:', e);
+                            }
 
                             return (
                                 <div className="text-sm space-y-3">
@@ -318,7 +379,7 @@ export default function PriceTriggerTab({
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div>
                                             <div className="font-medium text-gray-300 mb-1">Spike Percentage:</div>
-                                            <div className="text-gray-200">{log.spikePercent?.toFixed(2)}%</div>
+                                            <div className="text-gray-200">{log.spikePercent?.toFixed(2) ?? 'N/A'}%</div>
                                         </div>
                                         <div>
                                             <div className="font-medium text-gray-300 mb-1">Confidence:</div>
@@ -330,13 +391,13 @@ export default function PriceTriggerTab({
                                         <div>
                                             <div className="font-medium text-gray-300 mb-1">Token In:</div>
                                             <div className="text-gray-200">
-                                                {getTokenSymbol(log.tokenIn || '')} ({log.tokenIn})
+                                                {getTokenSymbol(log.tokenIn || '')} ({log.tokenIn || 'N/A'})
                                             </div>
                                         </div>
                                         <div>
                                             <div className="font-medium text-gray-300 mb-1">Token Out:</div>
                                             <div className="text-gray-200">
-                                                {getTokenSymbol(log.tokenOut || '')} ({log.tokenOut})
+                                                {getTokenSymbol(log.tokenOut || '')} ({log.tokenOut || 'N/A'})
                                             </div>
                                         </div>
                                     </div>
@@ -352,7 +413,7 @@ export default function PriceTriggerTab({
                                             <div>
                                                 <div className="font-medium text-gray-300 mb-1">Fear & Greed Index:</div>
                                                 <div className="text-gray-200">
-                                                    {log.fgi} ({log.fgiClassification})
+                                                    {log.fgi} ({log.fgiClassification || 'N/A'})
                                                 </div>
                                             </div>
                                         </div>
@@ -364,14 +425,16 @@ export default function PriceTriggerTab({
                                             <div className="text-gray-200 grid grid-cols-1 md:grid-cols-4 gap-2">
                                                 <span className="bg-gray-800/50 p-2 rounded">
                                                     <span className="text-gray-400">Action:</span>
-                                                    <span className={`ml-2 font-bold ${decision.decision === 'buy' ? 'text-green-400' :
-                                                            decision.decision === 'sell' ? 'text-red-400' : 'text-yellow-400'
+                                                    <span className={`ml-2 font-bold ${decision.decision?.toLowerCase() === 'buy' ? 'text-green-400' :
+                                                            decision.decision?.toLowerCase() === 'sell' ? 'text-red-400' :
+                                                                'text-yellow-400'
                                                         }`}>
-                                                        {decision.decision?.toUpperCase()}
+                                                        {decision.decision?.toUpperCase() || 'N/A'}
                                                     </span>
                                                 </span>
                                                 <span className="bg-gray-800/50 p-2 rounded">
-                                                    <span className="text-gray-400">Slippage:</span> {decision.slippage}%
+                                                    <span className="text-gray-400">Slippage:</span>
+                                                    {decision.slippage ? `${decision.slippage}%` : 'N/A'}
                                                 </span>
                                             </div>
                                         </div>
@@ -380,12 +443,12 @@ export default function PriceTriggerTab({
                                     <div>
                                         <div className="font-medium text-gray-300 mb-1">Reasoning:</div>
                                         <div className="text-gray-200 bg-gray-800/50 p-3 rounded-lg">
-                                            {log.reasoning || decision?.reasoning || "No reasoning provided"}
+                                            {decision?.reasoning || log.decision || "No reasoning provided"}
                                         </div>
                                     </div>
 
                                     <div className="pt-2 text-gray-400 text-xs">
-                                        ID: {log.id} | Created: {formatDateTime(log.createdAt)} |
+                                        ID: {log.id || 'N/A'} | Created: {formatDateTime(log.createdAt || Date.now())} |
                                         Block: {log.eventBlockNumber || 'N/A'}
                                     </div>
                                 </div>

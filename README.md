@@ -38,7 +38,7 @@ make deploy
 
 # -- Run Graphql --
 
-run-graphql-gateway
+make run-graphql-gateway
 
 
 # -- Services --

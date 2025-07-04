@@ -8,6 +8,7 @@ interface ServiceConfig {
     serviceKey: string;
     status: ServiceStatus;
     healthUrl: string;
+    details?: Record<string, any>; // For additional health info
 }
 
 // Shared configuration for service endpoints
@@ -47,7 +48,7 @@ const BASE_SERVICES: ServiceConfig[] = [
 export default function ConnectionStatusBar() {
     const [services, setServices] = useState<ServiceConfig[]>(BASE_SERVICES);
     const [lastChecked, setLastChecked] = useState<string>('');
-    const servicesRef = useRef(BASE_SERVICES); // Initialize with BASE_SERVICES
+    const servicesRef = useRef(BASE_SERVICES);
     const abortControllers = useRef<Map<string, AbortController>>(new Map());
     const isMounted = useRef(false);
 
@@ -68,12 +69,19 @@ export default function ConnectionStatusBar() {
     }, []);
 
     const performHealthCheck = useCallback(async () => {
+        if (!isMounted.current) return;
+
         const now = new Date();
         setLastChecked(now.toLocaleTimeString());
 
         const updatedServices = await Promise.all(
             servicesRef.current.map(async (service) => {
+                const controller = new AbortController();
+                abortControllers.current.set(service.serviceKey, controller);
+                const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s timeout
+
                 try {
+                    // Update status to connecting
                     setServices(prev => prev.map(s =>
                         s.serviceKey === service.serviceKey
                             ? { ...s, status: 'connecting' }
@@ -82,38 +90,44 @@ export default function ConnectionStatusBar() {
 
                     const response = await fetch(service.healthUrl, {
                         cache: 'no-store',
-                        headers: { 'Cache-Control': 'no-cache' }
+                        headers: { 'Cache-Control': 'no-cache' },
+                        signal: controller.signal
                     });
 
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
                     const healthData = await response.json();
+
                     return {
                         ...service,
                         status: (healthData.status === 'ok'
                             ? 'connected'
-                            : 'error') as ServiceStatus
+                            : 'error') as ServiceStatus,
+                        details: healthData
                     };
                 } catch (error) {
+                    const err = error as any;
                     return {
                         ...service,
-                        status: ((error instanceof TypeError)
+                        status: ((err instanceof TypeError || err.name === 'AbortError')
                             ? 'disconnected'
                             : 'error') as ServiceStatus
                     };
+                } finally {
+                    clearTimeout(timeoutId);
+                    abortControllers.current.delete(service.serviceKey);
                 }
             })
         );
 
-        setServices(updatedServices);
+        if (isMounted.current) {
+            setServices(updatedServices);
+        }
     }, []);
 
     useEffect(() => {
-        // Initial health check
         performHealthCheck();
-
         const interval = setInterval(performHealthCheck, 5000);
-
         return () => {
             clearInterval(interval);
             abortControllers.current.forEach(controller => controller.abort());
@@ -159,8 +173,15 @@ export default function ConnectionStatusBar() {
     // Calculate overall system status
     const allConnected = services.every(s => s.status === 'connected');
     const anyError = services.some(s => s.status === 'error');
-    const systemStatus = allConnected ? 'Operational' :
-        anyError ? 'Degraded' : 'Connecting...';
+    const anyDisconnected = services.some(s => s.status === 'disconnected');
+
+    const systemStatus = allConnected
+        ? 'Operational'
+        : anyError
+            ? 'Degraded'
+            : anyDisconnected
+                ? 'Partially Connected'
+                : 'Connecting...';
 
     return (
         <div className="mb-6 p-4 bg-gray-800 rounded-xl border border-gray-700">
@@ -168,7 +189,8 @@ export default function ConnectionStatusBar() {
                 <div className="flex items-center mb-3 sm:mb-0">
                     <div className="mr-3">
                         <div className={`w-4 h-4 rounded-full ${allConnected ? 'bg-green-500' :
-                            anyError ? 'bg-red-500 animate-pulse' : 'bg-yellow-500'
+                                anyError ? 'bg-red-500 animate-pulse' :
+                                    anyDisconnected ? 'bg-yellow-500' : 'bg-gray-500'
                             }`}></div>
                     </div>
                     <div>
@@ -176,7 +198,8 @@ export default function ConnectionStatusBar() {
                         <div className="text-xs text-gray-500 mt-1">
                             System Status: <span className={
                                 allConnected ? 'text-green-400' :
-                                    anyError ? 'text-red-400' : 'text-yellow-400'
+                                    anyError ? 'text-red-400' :
+                                        anyDisconnected ? 'text-yellow-400' : 'text-gray-400'
                             }>
                                 {systemStatus}
                             </span>
@@ -191,12 +214,14 @@ export default function ConnectionStatusBar() {
             <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                 {services.map((service, index) => {
                     const statusProps = getStatusProperties(service.status);
+                    const isGateway = service.serviceKey === 'graphql-gateway';
+
                     return (
                         <div
                             key={index}
                             className={`p-3 rounded-lg flex items-center transition-all ${service.status === 'connected' ? 'bg-gray-900' :
-                                service.status === 'error' ? 'bg-red-900/20' :
-                                    service.status === 'disconnected' ? 'bg-gray-900/50' : 'bg-yellow-900/20'
+                                    service.status === 'error' ? 'bg-red-900/20' :
+                                        service.status === 'disconnected' ? 'bg-gray-900/50' : 'bg-yellow-900/20'
                                 }`}
                         >
                             <div className="flex-1 min-w-0">
@@ -211,10 +236,24 @@ export default function ConnectionStatusBar() {
                                 <div className="text-xs text-gray-500 truncate">
                                     {service.healthUrl.replace('http://', '')}
                                 </div>
+
+                                {/* Additional health details for Gateway */}
+                                {isGateway && service.details && (
+                                    <div className="mt-1 text-xs">
+                                        <span className="text-gray-500">DB: </span>
+                                        <span className={
+                                            service.details.database === 'connected'
+                                                ? 'text-green-400'
+                                                : 'text-red-400'
+                                        }>
+                                            {service.details.database}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
                             <div className={`ml-2 text-sm font-medium ${service.status === 'connected' ? 'text-green-400' :
-                                service.status === 'error' ? 'text-red-400' :
-                                    service.status === 'disconnected' ? 'text-gray-400' : 'text-yellow-400'
+                                    service.status === 'error' ? 'text-red-400' :
+                                        service.status === 'disconnected' ? 'text-gray-400' : 'text-yellow-400'
                                 }`}>
                                 {statusProps.text}
                             </div>
@@ -229,6 +268,8 @@ export default function ConnectionStatusBar() {
                         <span className="text-green-400">All systems operational</span>
                     ) : anyError ? (
                         <span className="text-red-400">Some services unavailable</span>
+                    ) : anyDisconnected ? (
+                        <span className="text-yellow-400">Partial connectivity</span>
                     ) : (
                         <span className="text-yellow-400">Establishing connections...</span>
                     )}

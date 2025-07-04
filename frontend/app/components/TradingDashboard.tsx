@@ -86,7 +86,6 @@ export default function TradingDashboard() {
                             <TradeExecutionsTab
                                 expandedLogId={expandedLogId}
                                 toggleLogExpansion={toggleLogExpansion}
-                                initialLogs={[]}
                             />
                         )}
                     </div>
