@@ -26,14 +26,20 @@
       "@/*": [
         "./*"
       ]
-    }
+    },
+    // ADD THESE 3 LINES
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strictPropertyInitialization": false
   },
   "include": [
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    "app/utils/venice.js"
+    "app/utils/venice.js",
+    // ADD THIS LINE FOR TYPEORM SUPPORT
+    "shared/entities.ts"
   ],
   "exclude": [
     "node_modules"

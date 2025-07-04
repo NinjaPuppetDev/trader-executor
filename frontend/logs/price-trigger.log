@@ -1,0 +1,22 @@
+{"level":"info","message":"🚀 Starting Price Trigger Listener","service":"price-trigger","timestamp":"2025-07-03 09:37:16"}
+{"level":"info","message":"⛓️ Connected to: unknown (ID: 31337)","service":"price-trigger","timestamp":"2025-07-03 09:37:17"}
+{"level":"info","message":"👂 Listening for PriceSpikeDetected events...","service":"price-trigger","timestamp":"2025-07-03 09:37:17"}
+{"level":"info","message":"\n🛑 Price trigger listener stopped","service":"price-trigger","timestamp":"2025-07-03 10:00:30"}
+{"level":"info","message":"🚀 Starting Price Trigger Listener","service":"price-trigger","timestamp":"2025-07-03 10:11:05"}
+{"level":"info","message":"🔔 Listening for price spikes to trigger AI analysis","service":"price-trigger","timestamp":"2025-07-03 10:11:05"}
+{"level":"info","message":"⛓️ Connected to: unknown (ID: 31337)","service":"price-trigger","timestamp":"2025-07-03 10:11:07"}
+{"level":"info","message":"👂 Listening for PriceSpikeDetected events...","service":"price-trigger","timestamp":"2025-07-03 10:11:07"}
+{"level":"info","message":"🔔 Price spike detected! 17.57% change","service":"price-trigger","timestamp":"2025-07-03 10:12:48"}
+{"level":"info","message":"📊 FGI fetched: 73 (Greed)","service":"price-trigger","timestamp":"2025-07-03 10:12:48"}
+{"level":"info","message":"🚀 Starting Price Trigger Listener","service":"price-trigger","timestamp":"2025-07-03 10:14:30"}
+{"level":"info","message":"🔔 Listening for price spikes to trigger AI analysis","service":"price-trigger","timestamp":"2025-07-03 10:14:30"}
+{"level":"info","message":"⛓️ Connected to: unknown (ID: 31337)","service":"price-trigger","timestamp":"2025-07-03 10:14:30"}
+{"level":"info","message":"👂 Listening for PriceSpikeDetected events...","service":"price-trigger","timestamp":"2025-07-03 10:14:30"}
+{"level":"info","message":"🔔 Price spike detected! 17.57% change","service":"price-trigger","timestamp":"2025-07-03 10:14:30"}
+{"level":"info","message":"📊 FGI fetched: 73 (Greed)","service":"price-trigger","timestamp":"2025-07-03 10:14:30"}
+{"level":"info","message":"🚀 Starting Price Trigger Listener","service":"price-trigger","timestamp":"2025-07-03 10:25:23"}
+{"level":"info","message":"🔔 Listening for price spikes to trigger AI analysis","service":"price-trigger","timestamp":"2025-07-03 10:25:23"}
+{"level":"info","message":"⛓️ Connected to: unknown (ID: 31337)","service":"price-trigger","timestamp":"2025-07-03 10:25:23"}
+{"level":"info","message":"👂 Listening for PriceSpikeDetected events...","service":"price-trigger","timestamp":"2025-07-03 10:25:23"}
+{"level":"info","message":"🔔 Price spike detected! 17.57% change","service":"price-trigger","timestamp":"2025-07-03 10:25:23"}
+{"level":"info","message":"📊 FGI fetched: 73 (Greed)","service":"price-trigger","timestamp":"2025-07-03 10:25:23"}

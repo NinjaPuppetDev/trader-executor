@@ -1,44 +1,181 @@
 'use client';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { PriceDetectionLogEntry, isPriceDetectionLog } from './types';
 import LogsTable from './LogsTable';
+import { useTokenMetadata } from '../contexts/TokenMetadataContext';
+import { gql, useQuery, useApolloClient } from '@apollo/client';
 
-// Define connection status type
-type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'closed' | 'error';
+// Utility functions
+const formatDate = (date: Date | string | number) => {
+    const d = new Date(date);
+    return isNaN(d.getTime()) ? 'Invalid Date' :
+        d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+const formatDateTime = (date: Date | string | number) => {
+    const d = new Date(date);
+    return isNaN(d.getTime()) ? 'Invalid Date' :
+        d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
 
 interface PriceTriggerTabProps {
     expandedLogId: string | null;
     toggleLogExpansion: (id: string) => void;
-    updateConnectionStatus: (status: ConnectionStatus) => void;
 }
 
-const WS_URL = process.env.NEXT_PUBLIC_PRICE_WS_URL || 'ws://127.0.0.1:8082';
-const MAX_RECONNECT_ATTEMPTS = 10;
-const INITIAL_RECONNECT_DELAY = 1000;
-const HEARTBEAT_INTERVAL = 20000;
-const MAX_LOG_AGE = 3600000; // 1 hour
-const PROTOCOL_VERSION = 'v1.price-trigger';
+const GET_PRICE_DETECTIONS = gql`
+  query GetPriceDetections($limit: Int) {
+    recentDetections(limit: $limit) {
+      id
+      spikePercent
+      tokenIn
+      tokenOut
+      confidence
+      amount
+      createdAt
+      eventTxHash
+      eventBlockNumber
+      status
+      decision
+      fgi
+      fgiClassification
+      reasoning
+    }
+  }
+`;
+
+const getTableColumns = (getTokenSymbol: (address: string) => string) => [
+    {
+        header: "Time",
+        accessor: (log: PriceDetectionLogEntry) => formatDate(log.timestamp || log.createdAt)
+    },
+    {
+        header: "Spike %",
+        accessor: (log: PriceDetectionLogEntry) => (
+            <span className={`font-bold ${(log.spikePercent || 0) > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {log.spikePercent?.toFixed(2)}%
+            </span>
+        )
+    },
+    {
+        header: "Token Pair",
+        accessor: (log: PriceDetectionLogEntry) => (
+            <span>
+                {getTokenSymbol(log.tokenIn || '')} → {getTokenSymbol(log.tokenOut || '')}
+            </span>
+        )
+    },
+    {
+        header: "Status",
+        accessor: (log: PriceDetectionLogEntry) => (
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${log.status === 'completed' ? 'bg-green-900/30 text-green-400 border border-green-800' :
+                    log.status === 'failed' ? 'bg-red-900/30 text-red-400 border border-red-800' :
+                        'bg-yellow-900/30 text-yellow-400 border border-yellow-800'
+                }`}>
+                {log.status}
+            </span>
+        )
+    },
+    {
+        header: "Event Tx",
+        accessor: (log: PriceDetectionLogEntry) => (
+            log.eventTxHash ? (
+                <a
+                    href={`https://localhost/explorer/tx/${log.eventTxHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-400 hover:text-blue-300"
+                >
+                    {log.eventTxHash.slice(0, 6)}...{log.eventTxHash.slice(-4)}
+                </a>
+            ) : <span className="text-gray-500">-</span>
+        )
+    }
+];
 
 export default function PriceTriggerTab({
     expandedLogId,
-    toggleLogExpansion,
-    updateConnectionStatus
+    toggleLogExpansion
 }: PriceTriggerTabProps) {
+    // State management
     const [priceTriggerLogs, setPriceTriggerLogs] = useState<PriceDetectionLogEntry[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState(0);
-    const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
-    const [latency, setLatency] = useState<number | null>(null);
-    const [error, setError] = useState<string | null>(null);
+    const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'error'>('disconnected');
+    const { getTokenMetadata } = useTokenMetadata();
+    const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-    const reconnectAttempts = useRef(0);
-    const websocketRef = useRef<WebSocket | null>(null);
-    const heartbeatTimer = useRef<NodeJS.Timeout | null>(null);
-    const lastHeartbeat = useRef(0);
-    const reconnectTimer = useRef<NodeJS.Timeout | null>(null);
-    const isMounted = useRef(true);
+    // Proper hook usage
+    const apolloClient = useApolloClient();
 
-    // Parse decision data
+    // Fetch price detections
+    const { loading, error, refetch } = useQuery(GET_PRICE_DETECTIONS, {
+        variables: { limit: 50 },
+        fetchPolicy: 'network-only',
+        onCompleted: (data) => {
+            setConnectionStatus('connected');
+            if (data?.recentDetections) {
+                setPriceTriggerLogs(prev => {
+                    const existingLogsMap = new Map(prev.map(log => [log.id, log]));
+                    const newLogs = data.recentDetections.filter(
+                        (newLog: PriceDetectionLogEntry) => !existingLogsMap.has(newLog.id)
+                    );
+
+                    if (newLogs.length > 0) {
+                        const mergedLogs = [...newLogs, ...prev]
+                            .sort((a, b) =>
+                                new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+                            )
+                            .slice(0, 50);
+                        return mergedLogs;
+                    }
+                    return prev;
+                });
+                setLastUpdated(Date.now());
+            }
+        },
+        onError: (err) => {
+            console.error('GraphQL error:', err);
+            setConnectionStatus('error');
+        }
+    });
+
+    // Setup polling
+    useEffect(() => {
+        const startPolling = () => {
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+            }
+
+            pollingIntervalRef.current = setInterval(() => {
+                refetch().catch(err => {
+                    console.error('Polling error:', err);
+                    setConnectionStatus('disconnected');
+                });
+            }, 5000);
+        };
+
+        startPolling();
+        refetch(); // Initial fetch
+
+        return () => {
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+            }
+        };
+    }, [refetch]);
+
+    // Memoized values
+    const getTokenSymbol = useCallback((address: string): string => {
+        try {
+            return getTokenMetadata(address)?.symbol || 'UNKNOWN';
+        } catch {
+            return 'UNKNOWN';
+        }
+    }, [getTokenMetadata]);
+
+    const latestLog = useMemo(() => priceTriggerLogs[0] || null, [priceTriggerLogs]);
+    const columns = useMemo(() => getTableColumns(getTokenSymbol), [getTokenSymbol]);
+
     const parseDecision = useCallback((decision: string) => {
         if (!decision) return null;
 
@@ -47,253 +184,38 @@ export default function PriceTriggerTab({
         } catch {
             try {
                 const jsonMatch = decision.match(/\{[\s\S]*\}/);
-                return jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-            } catch {
-                return null;
+                if (jsonMatch) return JSON.parse(jsonMatch[0]);
+            } catch (e) {
+                console.error('Failed to parse decision:', e);
             }
+            return null;
         }
     }, []);
 
-    // Initialize WebSocket connection
-    const initWebSocket = useCallback(() => {
-        if (!isMounted.current) return;
-
-        // Cleanup previous connection
-        if (websocketRef.current) {
-            websocketRef.current.close();
-            websocketRef.current = null;
-        }
-
-        if (heartbeatTimer.current) {
-            clearInterval(heartbeatTimer.current);
-            heartbeatTimer.current = null;
-        }
-
-        if (reconnectTimer.current) {
-            clearTimeout(reconnectTimer.current);
-            reconnectTimer.current = null;
-        }
-
-        try {
-            websocketRef.current = new WebSocket(WS_URL, [PROTOCOL_VERSION]);
-            setConnectionStatus('connecting');
-            updateConnectionStatus('connecting');
-            setError(null);
-
-            websocketRef.current.onopen = () => {
-                if (!isMounted.current) return;
-                console.log('✅ Connected to WebSocket server');
-                setConnectionStatus('connected');
-                updateConnectionStatus('connected');
-                lastHeartbeat.current = Date.now();
-                reconnectAttempts.current = 0;
-
-                // Start heartbeat
-                heartbeatTimer.current = setInterval(() => {
-                    const now = Date.now();
-                    if (websocketRef.current?.readyState === WebSocket.OPEN) {
-                        websocketRef.current.send(JSON.stringify({
-                            type: 'ping',
-                            timestamp: now
-                        }));
-                    }
-                }, HEARTBEAT_INTERVAL);
-            };
-
-            websocketRef.current.onmessage = (event) => {
-                try {
-                    const message = JSON.parse(event.data);
-                    lastHeartbeat.current = Date.now();
-
-                    switch (message.type) {
-                        case 'pong':
-                            setLatency(Date.now() - message.timestamp);
-                            break;
-
-                        case 'initialLogs':
-                            if (Array.isArray(message.data)) {
-                                setPriceTriggerLogs(message.data);
-                                setLastUpdated(Date.now());
-                                setIsLoading(false);
-                            }
-                            break;
-
-                        case 'logUpdate':
-                            setPriceTriggerLogs(prev => {
-                                const withoutExisting = prev.filter(log => log.id !== message.data.id);
-                                return [message.data, ...withoutExisting].slice(0, 49);
-                            });
-                            setLastUpdated(Date.now());
-                            break;
-
-                        case 'error':
-                            console.error('Server error:', message.message);
-                            setError(`Server error: ${message.message}`);
-                            break;
-
-                        default:
-                            console.warn('Unknown message type:', message.type);
-                    }
-                } catch (parseError) {
-                    console.error('Message handling error:', parseError);
-                }
-            };
-
-            websocketRef.current.onerror = (event) => {
-                console.error('WebSocket error:', event);
-                setConnectionStatus('error');
-                updateConnectionStatus('error');
-                setError('WebSocket connection error');
-            };
-
-            websocketRef.current.onclose = (event) => {
-                if (!isMounted.current) return;
-
-                if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
-                    const delay = INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttempts.current);
-                    console.log(`♻️ Reconnecting in ${Math.round(delay / 1000)}s (${reconnectAttempts.current + 1}/${MAX_RECONNECT_ATTEMPTS})`);
-
-                    setConnectionStatus('reconnecting');
-                    updateConnectionStatus('reconnecting');
-                    reconnectAttempts.current += 1;
-
-                    reconnectTimer.current = setTimeout(() => {
-                        initWebSocket();
-                    }, delay);
-                } else {
-                    setConnectionStatus('closed');
-                    updateConnectionStatus('closed');
-                    setError(`Connection failed after ${MAX_RECONNECT_ATTEMPTS} attempts`);
-                }
-            };
-        } catch (err) {
-            setConnectionStatus('error');
-            updateConnectionStatus('error');
-            setError('Failed to initialize WebSocket connection');
-        }
-    }, [updateConnectionStatus]);
-
-    // Manage WebSocket lifecycle
-    useEffect(() => {
-        isMounted.current = true;
-        initWebSocket();
-
-        return () => {
-            isMounted.current = false;
-            if (websocketRef.current) websocketRef.current.close();
-            if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
-            if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-        };
-    }, [initWebSocket]);
-
-    // Prune old logs periodically
-    useEffect(() => {
-        const pruneOldLogs = () => {
-            const now = Date.now();
-            setPriceTriggerLogs(prev => prev.filter(log => {
-                const logTime = new Date(log.timestamp || log.createdAt).getTime();
-                return now - logTime < MAX_LOG_AGE;
-            }));
-        };
-
-        const pruneInterval = setInterval(pruneOldLogs, 300000);
-        return () => clearInterval(pruneInterval);
-    }, []);
-
-    // Format date safely
-    const formatDate = useCallback((date: Date | string | number) => {
-        try {
-            return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        } catch {
-            return 'Invalid Date';
-        }
-    }, []);
-
-    // Format date and time safely
-    const formatDateTime = useCallback((date: Date | string | number) => {
-        try {
-            return new Date(date).toLocaleString([], {
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        } catch {
-            return 'Invalid Date';
-        }
-    }, []);
-
-    // Connection status UI
+    // Connection status component
     const renderConnectionStatus = () => {
-        const statusConfig = {
-            connecting: { color: 'bg-yellow-500', text: 'Connecting...' },
-            connected: { color: 'bg-green-500 animate-pulse', text: 'Live' },
-            reconnecting: { color: 'bg-yellow-500', text: 'Reconnecting...' },
-            closed: { color: 'bg-red-500', text: 'Disconnected' },
-            error: { color: 'bg-red-500', text: 'Connection Error' }
-        };
-
-        const { color, text } = statusConfig[connectionStatus];
+        const statusColor = connectionStatus === 'connected' ? 'bg-green-500' :
+            connectionStatus === 'error' ? 'bg-red-500' : 'bg-yellow-500';
 
         return (
-            <div className="fixed top-4 left-4 flex items-center gap-2 bg-gray-800 px-3 py-1.5 rounded-lg text-sm z-50">
-                <span className={`w-3 h-3 rounded-full ${color}`}></span>
-                <span>{text}</span>
-                {connectionStatus === 'connected' && latency !== null && (
-                    <span className="text-gray-400 text-xs">
-                        {latency > 1000 ? `${(latency / 1000).toFixed(1)}s` : `${latency}ms`}
-                    </span>
-                )}
-                {connectionStatus === 'reconnecting' && (
-                    <span className="text-gray-400 text-xs">
-                        ({reconnectAttempts.current}/{MAX_RECONNECT_ATTEMPTS})
-                    </span>
-                )}
+            <div className="fixed top-4 left-4 flex items-center gap-2 bg-gray-800 px-3 py-1.5 rounded-lg text-sm z-50 shadow-lg">
+                <span className={`w-3 h-3 rounded-full ${statusColor} animate-pulse`}></span>
+                <span>
+                    {connectionStatus === 'connected' ? 'Live' :
+                        connectionStatus === 'error' ? 'Error' : 'Connecting...'}
+                </span>
             </div>
         );
     };
 
-    if (error) {
+    // Loading state
+    if (loading && priceTriggerLogs.length === 0) {
         return (
-            <div className="p-6 bg-red-900/20 rounded-lg border border-red-800/50">
-                <h2 className="text-xl font-bold text-red-400 mb-2">
-                    {connectionStatus === 'error' ? 'Connection Failed' : 'System Error'}
-                </h2>
-
-                <div className="mb-4 p-3 bg-red-900/30 rounded">
-                    <code className="text-red-300 break-all">{error}</code>
+            <div className="flex justify-center items-center h-64">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                    <p className="text-gray-400">Loading price detections...</p>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div>
-                        <h3 className="font-medium text-red-300 mb-1">Connection Details</h3>
-                        <p className="text-red-200">
-                            URL: {WS_URL}<br />
-                            Protocol: {PROTOCOL_VERSION}<br />
-                            Status: {connectionStatus}<br />
-                            Attempts: {reconnectAttempts.current}/{MAX_RECONNECT_ATTEMPTS}
-                        </p>
-                    </div>
-
-                    <div>
-                        <h3 className="font-medium text-red-300 mb-1">Troubleshooting</h3>
-                        <ul className="text-red-200 text-sm list-disc pl-5">
-                            <li>Check backend WebSocket server status</li>
-                            <li>Verify the server is running at: {WS_URL}</li>
-                            <li>Refresh the page to reconnect</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <button
-                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded flex items-center gap-2"
-                    onClick={() => window.location.reload()}
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
-                    </svg>
-                    Reload Application
-                </button>
             </div>
         );
     }
@@ -302,38 +224,55 @@ export default function PriceTriggerTab({
         <div className="space-y-8">
             {renderConnectionStatus()}
 
-            {isLoading && (
-                <div className="fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 flex items-center gap-2">
-                    <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Connecting to server...
-                </div>
-            )}
-
             {/* System Status Section */}
             <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
-                <h2 className="text-xl font-semibold mb-4">📈 Price Trigger System</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex justify-between items-start">
+                    <h2 className="text-xl font-semibold mb-4 flex items-center">
+                        <svg className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        Price Trigger System
+                    </h2>
+                    <div className="text-sm text-gray-400">
+                        <span className="text-blue-400">http://localhost:4000/graphql</span>
+                    </div>
+                </div>
+
+                <div className="flex justify-between items-center mb-4">
+                    <div className="text-sm text-gray-400">
+                        Connection: <span className={connectionStatus === 'connected' ? 'text-green-400' :
+                            connectionStatus === 'error' ? 'text-red-400' : 'text-yellow-400'}>
+                            {connectionStatus === 'connected' ? 'Connected' :
+                                connectionStatus === 'error' ? 'Error' : 'Connecting...'}
+                        </span>
+                    </div>
+                    <div className="text-sm text-gray-400">
+                        Last updated: {formatDate(lastUpdated)}
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                     <div className="bg-gray-800/30 p-4 rounded-lg border border-gray-700">
                         <h3 className="font-medium text-gray-300 mb-2">System Status</h3>
-                        <div className={`flex items-center ${connectionStatus === 'connected' ? 'text-green-400' : 'text-yellow-400'}`}>
+                        <div className={`flex items-center ${connectionStatus === 'connected' ? 'text-green-400' :
+                                connectionStatus === 'error' ? 'text-red-400' : 'text-yellow-400'
+                            }`}>
                             <svg className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                             </svg>
-                            {connectionStatus === 'connected' ? 'Active and monitoring' : 'Connection issues'}
+                            {connectionStatus === 'connected' ? 'Active and monitoring' :
+                                connectionStatus === 'error' ? 'Connection issues' : 'Establishing connection...'}
                         </div>
                     </div>
 
                     <div className="bg-gray-800/30 p-4 rounded-lg border border-gray-700">
                         <h3 className="font-medium text-gray-300 mb-2">Last Detected Spike</h3>
-                        {priceTriggerLogs.length > 0 && priceTriggerLogs[0]?.timestamp ? (
+                        {latestLog ? (
                             <div className="flex items-center text-yellow-400">
                                 <svg className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                                 </svg>
-                                {formatDateTime(priceTriggerLogs[0].timestamp)}
+                                {formatDateTime(latestLog.timestamp || latestLog.createdAt)}
                             </div>
                         ) : (
                             <div className="text-gray-400">No spikes detected yet</div>
@@ -348,84 +287,26 @@ export default function PriceTriggerTab({
                     <svg className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
-                    Price Trigger Logs (Real-time)
+                    Price Trigger Logs (Polling)
                 </h2>
-
-                <div className="text-sm text-gray-400 mb-4">
-                    Last updated: {formatDate(lastUpdated)}
-                    {connectionStatus === 'reconnecting' && (
-                        <span className="ml-2 text-yellow-400">
-                            • Attempting reconnect ({reconnectAttempts.current}/{MAX_RECONNECT_ATTEMPTS})
-                        </span>
-                    )}
-                </div>
 
                 {priceTriggerLogs.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">
-                        {isLoading ? 'Loading logs...' : 'No price detection logs found'}
+                        {loading ? (
+                            <div className="flex flex-col items-center">
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400 mb-2"></div>
+                                Waiting for logs...
+                            </div>
+                        ) : (
+                            'No price detection logs found'
+                        )}
                     </div>
                 ) : (
                     <LogsTable
                         logs={priceTriggerLogs}
                         expandedLogId={expandedLogId}
                         toggleLogExpansion={toggleLogExpansion}
-                        columns={[
-                            {
-                                header: "Time",
-                                accessor: (log) => formatDate(log.timestamp || log.createdAt)
-                            },
-                            {
-                                header: "Spike %",
-                                accessor: (log) => {
-                                    if (!isPriceDetectionLog(log)) return null;
-                                    return (
-                                        <span className={`font-bold ${(log.spikePercent || 0) > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                            {log.spikePercent?.toFixed(2)}%
-                                        </span>
-                                    );
-                                }
-                            },
-                            {
-                                header: "Price Context",
-                                accessor: (log) => {
-                                    if (!isPriceDetectionLog(log)) return null;
-                                    return (
-                                        <span className="max-w-[120px] truncate" title={log.priceContext}>
-                                            {log.priceContext?.substring(0, 30)}...
-                                        </span>
-                                    );
-                                }
-                            },
-                            {
-                                header: "Status",
-                                accessor: (log) => (
-                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${log.status === 'completed'
-                                        ? 'bg-green-900/30 text-green-400 border border-green-800'
-                                        : log.status === 'failed'
-                                            ? 'bg-red-900/30 text-red-400 border border-red-800'
-                                            : 'bg-yellow-900/30 text-yellow-400 border border-yellow-800'
-                                        }`}>
-                                        {log.status}
-                                    </span>
-                                )
-                            },
-                            {
-                                header: "Event Tx",
-                                accessor: (log) => {
-                                    if (!isPriceDetectionLog(log)) return <span className="text-gray-500">-</span>;
-                                    return log.eventTxHash ? (
-                                        <a
-                                            href={`https://localhost/explorer/tx/${log.eventTxHash}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-blue-400 hover:text-blue-300"
-                                        >
-                                            {log.eventTxHash.slice(0, 6)}...{log.eventTxHash.slice(-4)}
-                                        </a>
-                                    ) : <span className="text-gray-500">-</span>;
-                                }
-                            }
-                        ]}
+                        columns={columns}
                         renderExpandedRow={(log) => {
                             if (!isPriceDetectionLog(log)) return null;
 
@@ -433,102 +314,79 @@ export default function PriceTriggerTab({
 
                             return (
                                 <div className="text-sm space-y-3">
+                                    {/* FGI Data */}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <div className="font-medium text-gray-300 mb-1">Price Context:</div>
-                                            <div className="text-gray-200">{log.priceContext}</div>
-                                        </div>
-
                                         <div>
                                             <div className="font-medium text-gray-300 mb-1">Spike Percentage:</div>
                                             <div className="text-gray-200">{log.spikePercent?.toFixed(2)}%</div>
                                         </div>
+                                        <div>
+                                            <div className="font-medium text-gray-300 mb-1">Confidence:</div>
+                                            <div className="text-gray-200">{log.confidence || 'medium'}</div>
+                                        </div>
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div>
-                                            <div className="font-medium text-gray-300 mb-1">FGI Index:</div>
+                                            <div className="font-medium text-gray-300 mb-1">Token In:</div>
                                             <div className="text-gray-200">
-                                                {log.fgi} {log.fgiClassification && `(${log.fgiClassification})`}
+                                                {getTokenSymbol(log.tokenIn || '')} ({log.tokenIn})
                                             </div>
                                         </div>
-
                                         <div>
-                                            <div className="font-medium text-gray-300 mb-1">Decision Length:</div>
-                                            <div className="text-gray-200">{log.decision?.length || 0} chars</div>
+                                            <div className="font-medium text-gray-300 mb-1">Token Out:</div>
+                                            <div className="text-gray-200">
+                                                {getTokenSymbol(log.tokenOut || '')} ({log.tokenOut})
+                                            </div>
                                         </div>
                                     </div>
 
+                                    <div>
+                                        <div className="font-medium text-gray-300 mb-1">Amount:</div>
+                                        <div className="text-gray-200">{log.amount || '0'}</div>
+                                    </div>
+
+                                    {/* FGI Display */}
+                                    {log.fgi !== undefined && (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <div className="font-medium text-gray-300 mb-1">Fear & Greed Index:</div>
+                                                <div className="text-gray-200">
+                                                    {log.fgi} ({log.fgiClassification})
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {decision && (
-                                        <>
-                                            <div>
-                                                <div className="font-medium text-gray-300 mb-1">AI Decision:</div>
-                                                <div className="text-gray-200 grid grid-cols-1 md:grid-cols-4 gap-2">
-                                                    <span className="bg-gray-800/50 p-2 rounded">
-                                                        <span className="text-gray-400">Action:</span>
-                                                        <span className={`ml-2 font-bold ${decision.decision === 'buy' ? 'text-green-400' :
+                                        <div>
+                                            <div className="font-medium text-gray-300 mb-1">AI Decision:</div>
+                                            <div className="text-gray-200 grid grid-cols-1 md:grid-cols-4 gap-2">
+                                                <span className="bg-gray-800/50 p-2 rounded">
+                                                    <span className="text-gray-400">Action:</span>
+                                                    <span className={`ml-2 font-bold ${decision.decision === 'buy' ? 'text-green-400' :
                                                             decision.decision === 'sell' ? 'text-red-400' : 'text-yellow-400'
-                                                            }`}>
-                                                            {decision.decision?.toUpperCase()}
-                                                        </span>
+                                                        }`}>
+                                                        {decision.decision?.toUpperCase()}
                                                     </span>
-                                                    <span className="bg-gray-800/50 p-2 rounded">
-                                                        <span className="text-gray-400">Amount:</span> {decision.amount}
-                                                    </span>
-                                                    <span className="bg-gray-800/50 p-2 rounded">
-                                                        <span className="text-gray-400">Slippage:</span> {decision.slippage}%
-                                                    </span>
-                                                    <span className="bg-gray-800/50 p-2 rounded">
-                                                        <span className="text-gray-400">Tokens:</span>
-                                                        <div className="truncate">
-                                                            {log.tokenIn || decision.tokenIn} → {log.tokenOut || decision.tokenOut}
-                                                        </div>
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            <div>
-                                                <div className="font-medium text-gray-300 mb-1">Reasoning:</div>
-                                                <div className="text-gray-200 bg-gray-800/50 p-3 rounded-lg">
-                                                    {log.reasoning || decision.reasoning || "No reasoning provided"}
-                                                </div>
-                                            </div>
-                                        </>
-                                    )}
-
-                                    {decision?.error && (
-                                        <div className="bg-red-900/20 p-3 rounded-lg">
-                                            <div className="font-medium text-red-300 mb-1">System Alert:</div>
-                                            <div className="text-red-400">{decision.errorMessage}</div>
-                                        </div>
-                                    )}
-
-                                    {log.txHash && (
-                                        <div>
-                                            <div className="font-medium text-gray-300 mb-1">Execution Tx:</div>
-                                            <a
-                                                href={`https://localhost/explorer/tx/${log.txHash}`}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-purple-400 hover:text-purple-300"
-                                            >
-                                                {log.txHash}
-                                            </a>
-                                        </div>
-                                    )}
-
-                                    {log.error && (
-                                        <div>
-                                            <div className="font-medium text-gray-300 mb-1">Error:</div>
-                                            <div className="text-red-400 bg-red-900/20 p-2 rounded">
-                                                {log.error}
+                                                </span>
+                                                <span className="bg-gray-800/50 p-2 rounded">
+                                                    <span className="text-gray-400">Slippage:</span> {decision.slippage}%
+                                                </span>
                                             </div>
                                         </div>
                                     )}
+
+                                    <div>
+                                        <div className="font-medium text-gray-300 mb-1">Reasoning:</div>
+                                        <div className="text-gray-200 bg-gray-800/50 p-3 rounded-lg">
+                                            {log.reasoning || decision?.reasoning || "No reasoning provided"}
+                                        </div>
+                                    </div>
 
                                     <div className="pt-2 text-gray-400 text-xs">
                                         ID: {log.id} | Created: {formatDateTime(log.createdAt)} |
-                                        Block: {log.blockNumber || 'N/A'}
+                                        Block: {log.eventBlockNumber || 'N/A'}
                                     </div>
                                 </div>
                             );

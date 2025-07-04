@@ -18,7 +18,9 @@ interface BaseLogEntry {
 }
 
 export interface PriceDetectionLogEntry extends BaseLogEntry {
-    type: "price-detections";
+    type: "price-detections";  // Add this
+    amount: string;
+    confidence: string;
     priceContext: string;
     eventTxHash?: string;
     eventBlockNumber?: number;
@@ -31,10 +33,7 @@ export interface PriceDetectionLogEntry extends BaseLogEntry {
     success?: boolean;
     tokenIn?: string;
     tokenOut?: string;
-    buyVolatile?: boolean;
-    amountInWei?: string;
-    minAmountOut?: string;
-    reasoning?: string;
+    reasoning?: string;  // Add this
 }
 
 export interface VeniceLogEntry extends BaseLogEntry {

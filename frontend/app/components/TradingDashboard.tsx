@@ -7,67 +7,11 @@ import ConnectionStatusBar from "./ConnectionStatusBar";
 
 export default function TradingDashboard() {
     const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
-    const [connectionStatus, setConnectionStatus] = useState({
-        venice: 'connecting',
-        priceTrigger: 'connecting',
-        tradeExecutor: 'connecting'
-    });
-    const [activeTab, setActiveTab] = useState('venice'); // State for active tab
+    const [activeTab, setActiveTab] = useState('venice');
 
     const toggleLogExpansion = useCallback((id: string) => {
         setExpandedLogId(prev => prev === id ? null : id);
     }, []);
-
-    const updateConnectionStatus = useCallback((service: 'venice' | 'priceTrigger' | 'tradeExecutor', status: string) => {
-        setConnectionStatus(prev => ({
-            ...prev,
-            [service]: status
-        }));
-    }, []);
-
-    // Tab configuration with emoji icons
-    const tabs = [
-        {
-            id: 'venice',
-            label: 'Venice AI',
-            icon: '⚡', // Lightning bolt emoji
-            component: (
-                <VeniceTraderTab
-                    expandedLogId={expandedLogId}
-                    toggleLogExpansion={toggleLogExpansion}
-                    updateConnectionStatus={(status) => updateConnectionStatus('venice', status)} prompt={""} setPrompt={function (value: string): void {
-                        throw new Error("Function not implemented.");
-                    }} response={""} loading={false} lastVeniceTrigger={null} logs={[]} tradeExecutions={[]} loadingLogs={false} sendPrompt={function (): void {
-                        throw new Error("Function not implemented.");
-                    }} formatDecision={function (decision: string): string {
-                        throw new Error("Function not implemented.");
-                    }} />
-            )
-        },
-        {
-            id: 'price-trigger',
-            label: 'Price Triggers',
-            icon: '📊', // Chart emoji
-            component: (
-                <PriceTriggerTab
-                    expandedLogId={expandedLogId}
-                    toggleLogExpansion={toggleLogExpansion}
-                    updateConnectionStatus={(status) => updateConnectionStatus('priceTrigger', status)}
-                />
-            )
-        },
-        {
-            id: 'executions',
-            label: 'Trade Executions',
-            icon: '🔄', // Refresh/swap emoji
-            component: (
-                <TradeExecutionsTab
-                    expandedLogId={expandedLogId}
-                    toggleLogExpansion={toggleLogExpansion}
-                    updateConnectionStatus={(status) => updateConnectionStatus('tradeExecutor', status)} initialLogs={[]} />
-            )
-        }
-    ];
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-gray-100 py-8 px-4 sm:px-6 lg:px-8">
@@ -88,13 +32,17 @@ export default function TradingDashboard() {
                 </div>
 
                 {/* Connection Status Bar */}
-                <ConnectionStatusBar status={connectionStatus} />
+                <ConnectionStatusBar />
 
                 {/* Custom Tab Implementation */}
                 <div className="mb-6">
                     {/* Tab Navigation */}
                     <div className="flex space-x-1 rounded-xl bg-gray-800 p-1">
-                        {tabs.map((tab) => (
+                        {[
+                            { id: 'venice', label: 'Venice AI', icon: '⚡' },
+                            { id: 'price-trigger', label: 'Price Triggers', icon: '📊' },
+                            { id: 'executions', label: 'Trade Executions', icon: '🔄' }
+                        ].map((tab) => (
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
@@ -111,14 +59,36 @@ export default function TradingDashboard() {
 
                     {/* Tab Content */}
                     <div className="mt-4">
-                        {tabs.map((tab) => (
-                            <div
-                                key={tab.id}
-                                className={activeTab === tab.id ? 'block' : 'hidden'}
-                            >
-                                {tab.component}
-                            </div>
-                        ))}
+                        {activeTab === 'venice' && (
+                            <VeniceTraderTab
+                                expandedLogId={expandedLogId}
+                                toggleLogExpansion={toggleLogExpansion}
+                                prompt={""}
+                                setPrompt={() => { }}
+                                response={""}
+                                loading={false}
+                                lastVeniceTrigger={null}
+                                logs={[]}
+                                tradeExecutions={[]}
+                                loadingLogs={false}
+                                sendPrompt={() => { }}
+                                formatDecision={() => ""} updateConnectionStatus={function (status: string): void {
+                                    throw new Error("Function not implemented.");
+                                }} />
+                        )}
+                        {activeTab === 'price-trigger' && (
+                            <PriceTriggerTab
+                                expandedLogId={expandedLogId}
+                                toggleLogExpansion={toggleLogExpansion}
+                            />
+                        )}
+                        {activeTab === 'executions' && (
+                            <TradeExecutionsTab
+                                expandedLogId={expandedLogId}
+                                toggleLogExpansion={toggleLogExpansion}
+                                initialLogs={[]}
+                            />
+                        )}
                     </div>
                 </div>
 

@@ -1,15 +1,14 @@
 import { ethers } from 'ethers';
-import { readFile, writeFile, mkdir, stat } from 'fs/promises';
-import path from 'path';
-import { existsSync } from 'fs';
-import { lock } from 'proper-lockfile';
-import WebSocket from 'isomorphic-ws';
-import { TradeExecutionLog, TradingDecision } from './types';
-
-// Define TradeStatus type if not already imported
-type TradeStatus = 'invalid' | 'skipped' | 'executed';
-import { allocatePort, releasePort, isPortAvailable } from './shared/portManager';
+import { GraphQLClient, gql } from 'graphql-request';
+import express from 'express';
+import cors from 'cors';
+import { DataSource } from 'typeorm';
 import { getLogger } from './shared/logger';
+import {
+    PriceDetectionLog,
+    TradeExecutionLog,
+    ProcessedTrigger
+} from '../backend/shared/entities';
 
 // ======================
 // Configuration
@@ -20,201 +19,88 @@ const CONFIG = {
     executorAddress: '0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6',
     stableToken: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
     volatileToken: '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0',
-    defaultAmount: '10',
     slippagePercent: 1,
     minContractBalance: '10',
     maxTradeAmount: '0.04',
     processingDelay: 5000,
     minTradeAmount: '0.001',
-    wsReconnectInterval: 5000,
-    wsMaxRetries: 5,
-    heartbeatInterval: 30000
+    graphqlEndpoint: 'http://localhost:4000/graphql',
+    databasePath: 'data/trigger-system.db'
 };
 
 // ======================
-// File Paths
+// Database Setup
 // ======================
-const LOGS_DIR = path.join(__dirname, 'logs');
-const PRICE_DETECTION_FILE = path.join(LOGS_DIR, 'price-detections.json');
-const TRADE_EXECUTIONS_FILE = path.join(LOGS_DIR, 'executed-trades.json');
-const PROCESSED_FILE = path.join(LOGS_DIR, 'processed-ids.json');
+const AppDataSource = new DataSource({
+    type: "sqlite",
+    database: CONFIG.databasePath,
+    entities: [PriceDetectionLog, TradeExecutionLog, ProcessedTrigger],
+    synchronize: true,
+    logging: false
+});
 
 // ======================
 // Global Declarations
 // ======================
 const logger = getLogger('trade-executor');
-const provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
-const wallet = new ethers.Wallet(CONFIG.privateKey, provider);
+let provider: ethers.providers.JsonRpcProvider;
+let wallet: ethers.Wallet;
 let executorContract: ethers.Contract;
-let wsClient: WebSocket | null = null;
-let wsConnectionAttempts = 0;
-let allocatedWsPort: number | null = null;
+let graphQLClient: GraphQLClient;
 
 // ======================
-// WebSocket Management
+// GraphQL Integration
 // ======================
-async function setupWebSocketServer() {
-    try {
-        allocatedWsPort = await allocatePort('tradeExecutorWs');
-
-        // Verify port availability at system level
-        const isAvailable = await isPortAvailable(allocatedWsPort);
-        if (!isAvailable) {
-            throw new Error(`Port ${allocatedWsPort} is already in use at system level`);
+async function logTradeToGraphQL(log: TradeExecutionLog) {
+    const mutation = gql`
+        mutation LogTrade($entry: TradeInput!) {
+            logTrade(entry: $entry)
         }
+    `;
 
-        const wss = new WebSocket.Server({ port: allocatedWsPort });
-        logger.info(`📡 Trade Executor WebSocket server started on port ${allocatedWsPort}`);
-
-        wss.on('connection', async (ws: WebSocket) => {
-            logger.info('🔌 New client connected to Executed Trades WebSocket');
-
-            // Setup heartbeat
-            let isAlive = true;
-            const heartbeatInterval = setInterval(() => {
-                if (!isAlive) {
-                    logger.warn('Terminating unresponsive client');
-                    ws.terminate();
-                    return;
-                }
-
-                isAlive = false;
-                ws.ping();
-            }, CONFIG.heartbeatInterval);
-
-            ws.on('pong', () => {
-                isAlive = true;
-            });
-
-            try {
-                const content = await readFile(TRADE_EXECUTIONS_FILE, 'utf-8');
-                const logs = content.trim() ? JSON.parse(content) : [];
-
-                ws.send(JSON.stringify({
-                    type: 'initialLogs',
-                    data: logs.slice(0, 50)
-                }));
-            } catch (error) {
-                logger.error('Error sending initial logs:', error);
-            }
-
-            ws.on('close', () => {
-                logger.info('🔌 Client disconnected');
-                clearInterval(heartbeatInterval);
-            });
-        });
-
-        wss.on('error', (err: Error) => {
-            if (err.message.includes('EADDRINUSE')) {
-                logger.warn('Port conflict detected');
-            } else {
-                logger.error('WebSocket server error:', err);
+    try {
+        await graphQLClient.request(mutation, {
+            entry: {
+                id: log.id,  // Add this
+                sourceLogId: log.sourceLogId,
+                status: log.status,
+                tokenIn: log.tokenIn,
+                tokenOut: log.tokenOut,
+                amount: log.amount,
+                tokenInDecimals: log.tokenInDecimals,
+                tokenOutDecimals: log.tokenOutDecimals,
+                txHash: log.txHash,
+                gasUsed: log.gasUsed,
+                amountIn: log.amountIn,
+                minAmountOut: log.minAmountOut,
+                actualAmountOut: log.actualAmountOut,
+                error: log.error
             }
         });
-
-        return wss;
+        logger.info(`📤 Logged trade to GraphQL: ${log.sourceLogId}`);
     } catch (error) {
-        logger.error('WebSocket server setup failed:', error);
-        if (allocatedWsPort) {
-            releasePort(allocatedWsPort);
-        }
-        throw error;
-    }
-}
-
-function connectToWebSocketServer() {
-    if (!allocatedWsPort) {
-        logger.error('WebSocket port not allocated');
-        return;
-    }
-
-    wsClient = new WebSocket(`ws://localhost:${allocatedWsPort}`);
-
-    wsClient.on('open', () => {
-        wsConnectionAttempts = 0;
-        logger.info(`🔌 Connected to Trade Executor WebSocket server on port ${allocatedWsPort}`);
-    });
-
-    wsClient.on('error', (err: unknown) => {
-        logger.error("WebSocket connection error", err);
-
-        // Attempt reconnect with exponential backoff
-        wsConnectionAttempts++;
-        if (wsConnectionAttempts <= CONFIG.wsMaxRetries) {
-            const delay = Math.min(
-                CONFIG.wsReconnectInterval * Math.pow(1.5, wsConnectionAttempts),
-                30000
-            );
-            logger.info(`♻️ Reconnecting in ${delay / 1000}s (attempt ${wsConnectionAttempts}/${CONFIG.wsMaxRetries})`);
-            setTimeout(() => connectToWebSocketServer(), delay);
-        } else {
-            logger.error("❌ Maximum WebSocket connection attempts reached");
-        }
-    });
-
-    wsClient.on('close', () => {
-        logger.info("🔌 WebSocket connection closed");
-        if (wsConnectionAttempts < CONFIG.wsMaxRetries) {
-            setTimeout(() => connectToWebSocketServer(), CONFIG.wsReconnectInterval);
-        }
-    });
-}
-
-async function broadcastTradeUpdate(log: TradeExecutionLog) {
-    if (!wsClient || wsClient.readyState !== WebSocket.OPEN) {
-        logger.warn("⚠️ WebSocket not connected, skipping broadcast");
-        return;
-    }
-
-    try {
-        const message = JSON.stringify({
-            type: 'tradeUpdate',
-            data: log
-        });
-        wsClient.send(message);
-        logger.info(`📤 Broadcasted trade update for ${log.id}`);
-    } catch (err) {
-        logger.error("WebSocket send error", err);
+        logger.error('GraphQL trade log error:', error);
     }
 }
 
 // ======================
 // Core Functions
 // ======================
-async function logTradeExecution(entry: TradeExecutionLog) {
-    return withFileLock(TRADE_EXECUTIONS_FILE, async (content) => {
-        const logs: TradeExecutionLog[] = content.trim() ? JSON.parse(content) : [];
-        logs.unshift(entry);
-        await writeFile(TRADE_EXECUTIONS_FILE, JSON.stringify(logs, null, 2));
-        await broadcastTradeUpdate(entry);
-        return true;
-    });
+async function initializeDatabase() {
+    try {
+        await AppDataSource.initialize();
+        logger.info('✅ Database connected');
+    } catch (error) {
+        logger.error('❌ Database initialization failed', error);
+        process.exit(1);
+    }
 }
 
 async function setupEnvironment() {
     try {
-        if (!existsSync(LOGS_DIR)) {
-            await mkdir(LOGS_DIR, { recursive: true });
-        }
-
-        const files = [
-            { path: PRICE_DETECTION_FILE, default: '[]' },
-            { path: TRADE_EXECUTIONS_FILE, default: '[]' },
-            { path: PROCESSED_FILE, default: '[]' }
-        ];
-
-        for (const { path: filePath, default: defaultContent } of files) {
-            if (!existsSync(filePath)) {
-                await writeFile(filePath, defaultContent, 'utf-8');
-            } else {
-                try {
-                    const content = await readFile(filePath, 'utf-8');
-                    if (!content.trim()) await writeFile(filePath, defaultContent, 'utf-8');
-                } catch {
-                    await writeFile(filePath, defaultContent, 'utf-8');
-                }
-            }
-        }
+        provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
+        wallet = new ethers.Wallet(CONFIG.privateKey, provider);
+        graphQLClient = new GraphQLClient(CONFIG.graphqlEndpoint);
 
         executorContract = new ethers.Contract(
             CONFIG.executorAddress,
@@ -226,6 +112,13 @@ async function setupEnvironment() {
             ],
             wallet
         );
+
+        const code = await provider.getCode(CONFIG.executorAddress);
+        if (code === '0x') {
+            throw new Error(`❌ No contract at ${CONFIG.executorAddress}`);
+        }
+
+        logger.info('✅ Environment setup complete');
     } catch (error) {
         logger.error('❌ Environment setup failed:', error);
         throw error;
@@ -265,7 +158,6 @@ async function ensureContractFunds() {
         logger.info(`Stable balance: ${ethers.utils.formatUnits(stableBalance, stableDecimals)}`);
         logger.info(`Volatile balance: ${ethers.utils.formatUnits(volatileBalance, volatileDecimals)}`);
 
-        // Fund stable token if needed
         if (stableBalance.lt(minStable)) {
             const transferAmount = minStable.sub(stableBalance);
             logger.info(`⚡ Transferring ${ethers.utils.formatUnits(transferAmount, stableDecimals)} stable tokens`);
@@ -273,7 +165,6 @@ async function ensureContractFunds() {
             await tx.wait();
         }
 
-        // Fund volatile token if needed
         if (volatileBalance.lt(minVolatile)) {
             const transferAmount = minVolatile.sub(volatileBalance);
             logger.info(`⚡ Transferring ${ethers.utils.formatUnits(transferAmount, volatileDecimals)} volatile tokens`);
@@ -308,7 +199,7 @@ function calculateOutputWithFees(
 }
 
 async function executeTrade(
-    decision: TradingDecision,
+    decision: any,
     sourceLogId: string
 ) {
     if (!['buy', 'sell'].includes(decision.decision)) {
@@ -342,13 +233,11 @@ async function executeTrade(
     const tokenInDecimals = await tokenInContract.decimals();
     const amountIn = ethers.utils.parseUnits(decision.amount, tokenInDecimals);
 
-    // 1. Check token balance
     const balance = await tokenInContract.balanceOf(CONFIG.executorAddress);
     if (balance.lt(amountIn)) {
         throw new Error(`Insufficient balance: ${ethers.utils.formatUnits(balance, tokenInDecimals)} < ${decision.amount}`);
     }
 
-    // 2. Check and set allowance
     const allowance = await tokenInContract.allowance(CONFIG.executorAddress, exchangeAddress);
     if (allowance.lt(amountIn)) {
         logger.info('⚠️ Increasing allowance...');
@@ -356,17 +245,14 @@ async function executeTrade(
         await approveTx.wait();
     }
 
-    // 3. Get reserves and calculate expected output with fees
     const [reserve0, reserve1] = await exchangeContract.getReserves();
     const stableReserve = buyVolatile ? reserve0 : reserve1;
     const volatileReserve = buyVolatile ? reserve1 : reserve0;
 
-    // Use fee-adjusted calculation
     const expectedOutput = buyVolatile
         ? calculateOutputWithFees(amountIn, stableReserve, volatileReserve)
         : calculateOutputWithFees(amountIn, volatileReserve, stableReserve);
 
-    // 4. Price impact check (max 5%)
     const priceImpact = buyVolatile
         ? amountIn.div(stableReserve.add(amountIn))
         : amountIn.div(volatileReserve.add(amountIn));
@@ -375,7 +261,6 @@ async function executeTrade(
         throw new Error(`Price impact too high: ${ethers.utils.formatUnits(priceImpact.mul(100), 16)}%`);
     }
 
-    // Dynamic slippage adjustment
     let slippage = decision.slippage || CONFIG.slippagePercent;
     let minAmountOut = calculateMinAmountOut(expectedOutput, slippage);
     let simulationSuccess = false;
@@ -386,7 +271,6 @@ async function executeTrade(
         try {
             logger.info(`🔍 Simulating trade (attempt ${attempts + 1}) with slippage: ${slippage}%...`);
 
-            // Get fresh reserves for each attempt
             const [newReserve0, newReserve1] = await exchangeContract.getReserves();
             const newStableReserve = buyVolatile ? newReserve0 : newReserve1;
             const newVolatileReserve = buyVolatile ? newReserve1 : newReserve0;
@@ -397,7 +281,6 @@ async function executeTrade(
 
             minAmountOut = calculateMinAmountOut(freshExpectedOutput, slippage);
 
-            // Estimate gas cost
             const gasEstimate = await executorContract.estimateGas.executeTrade(
                 buyVolatile,
                 amountIn,
@@ -405,7 +288,6 @@ async function executeTrade(
                 { from: wallet.address }
             );
 
-            // Add 20% buffer
             const gasLimit = gasEstimate.mul(120).div(100);
 
             await executorContract.callStatic.executeTrade(
@@ -425,14 +307,11 @@ async function executeTrade(
                 }
                 throw new Error(`Trade simulation failed: ${reason}`);
             }
-
-            // Increase slippage for next attempt
             slippage += 1;
             logger.warn(`⚠️ Simulation failed, increasing slippage to ${slippage}%`);
         }
     }
 
-    // 5. Execute actual trade
     logger.info(`🏁 Executing trade with slippage: ${slippage}%`);
     const txResponse = await executorContract.executeTrade(
         buyVolatile,
@@ -469,22 +348,9 @@ async function executeTrade(
 }
 
 // ======================
-// Logging Utilities
-// ======================
-async function withFileLock<T>(filePath: string, operation: (content: string) => Promise<T>): Promise<T> {
-    const release = await lock(filePath, { retries: 5 });
-    try {
-        const content = existsSync(filePath) ? await readFile(filePath, 'utf-8') : '';
-        return await operation(content);
-    } finally {
-        await release();
-    }
-}
-
-// ======================
 // Decision Processing
 // ======================
-function validateTradeDecision(decision: TradingDecision): string | null {
+function validateTradeDecision(decision: any): string | null {
     if (!['buy', 'sell', 'hold'].includes(decision.decision)) {
         return 'Invalid decision type';
     }
@@ -506,7 +372,6 @@ function validateTradeDecision(decision: TradingDecision): string | null {
         return 'Invalid trade amount';
     }
 
-    // Minimum trade amount check
     if (amountNum < parseFloat(CONFIG.minTradeAmount)) {
         return `Amount too small (min ${CONFIG.minTradeAmount})`;
     }
@@ -524,7 +389,7 @@ function validateTradeDecision(decision: TradingDecision): string | null {
     return null;
 }
 
-function createFallbackDecision(error: string): TradingDecision {
+function createFallbackDecision(error: string): any {
     return {
         decision: 'hold',
         tokenIn: '',
@@ -543,39 +408,39 @@ async function processLogs() {
     try {
         await ensureContractFunds();
 
-        const priceDetectionLogs = await withFileLock<any[]>(
-            PRICE_DETECTION_FILE,
-            async (content) => content.trim() ? JSON.parse(content) : []
-        );
+        const priceDetectionLogRepo = AppDataSource.getRepository(PriceDetectionLog);
+        const processedTriggerRepo = AppDataSource.getRepository(ProcessedTrigger);
+        const tradeExecutionLogRepo = AppDataSource.getRepository(TradeExecutionLog);
 
-        const processedIds = await withFileLock<string[]>(
-            PROCESSED_FILE,
-            async (content) => content.trim() ? JSON.parse(content) : []
-        );
+        // Get unprocessed completed logs
+        const unprocessedLogs = await priceDetectionLogRepo
+            .createQueryBuilder('log')
+            .leftJoin(
+                ProcessedTrigger,
+                'pt',
+                'pt.id = :tradePrefix || log.id',
+                { tradePrefix: 'trade-' }
+            )
+            .where('log.status = :status', { status: 'completed' })
+            .andWhere('pt.id IS NULL')
+            .getMany();
 
-        const newLogs = priceDetectionLogs.filter(log =>
-            !processedIds.includes(log.id) &&
-            log.status === 'completed' &&
-            log.decision
-        );
-
-        if (newLogs.length === 0) {
+        if (unprocessedLogs.length === 0) {
             logger.info('⏭️ No new logs to process');
             return;
         }
 
-        logger.info(`🔍 Found ${newLogs.length} new logs to process`);
+        logger.info(`🔍 Found ${unprocessedLogs.length} new logs to process`);
 
-        for (const log of newLogs) {
+        for (const log of unprocessedLogs) {
             logger.info(`🔎 Processing log: ${log.id}`);
-            let decision: TradingDecision | null = null;
+            let decision: any = null;
             let tradeResult = null;
-            let decisionStatus: TradeStatus = 'invalid';
+            let decisionStatus: string = 'invalid';
             let errorMessage = '';
 
             try {
-                // Try to parse the decision
-                const parsedDecision: TradingDecision = JSON.parse(log.decision);
+                const parsedDecision = JSON.parse(log.decision ?? '{}');
                 const validationError = validateTradeDecision(parsedDecision);
 
                 if (validationError) {
@@ -594,7 +459,6 @@ async function processLogs() {
                     logger.info(`✅ Trade executed for log ${log.id}`);
                 }
             } catch (error) {
-                // Enhanced error handling
                 if (error instanceof Error) {
                     errorMessage = `${error.message}`;
                 } else if (typeof error === 'string') {
@@ -609,92 +473,132 @@ async function processLogs() {
 
                 logger.error(`❌❌❌ CRITICAL ERROR processing log ${log.id}: ${errorMessage}`);
 
-                // Create fallback decision if parsing failed
                 if (!decision) {
                     decision = createFallbackDecision(errorMessage);
                 }
             }
 
-            const tradeLog: TradeExecutionLog = {
-                source: 'trade-execution',
-                id: `exec-${Date.now()}`,
-                timestamp: new Date().toISOString(),
-                sourceLogId: log.id,
-                sourceType: 'price-detections',
-                decision: decision!, // Now matches the type
-                status: decisionStatus, // Use status directly
-                createdAt: new Date().toISOString(),
-                tokenIn: decision?.tokenIn || '',
-                tokenOut: decision?.tokenOut || '',
-                amount: decision?.amount || '0',
-                tokenInDecimals: tradeResult?.tokenInDecimals || 0,
-                tokenOutDecimals: tradeResult?.tokenOutDecimals || 0,
-                amountIn: tradeResult?.amountIn || '0',
-                minAmountOut: tradeResult?.minAmountOut || '0',
-                actualAmountOut: tradeResult?.actualAmountOut || '0',
-                txHash: tradeResult?.txHash,
-                gasUsed: tradeResult?.gasUsed,
-                error: errorMessage,
-                type: 'trade-execution'
-            };
+            // Create and save trade execution log
+            const tradeLog = new TradeExecutionLog();
+            tradeLog.id = `exec-${Date.now()}`;
+            tradeLog.timestamp = new Date().toISOString();
+            tradeLog.createdAt = new Date().toISOString();
+            tradeLog.sourceLogId = log.id;
+            tradeLog.status = decisionStatus;
+            tradeLog.tokenIn = decision.tokenIn || '';
+            tradeLog.tokenOut = decision.tokenOut || '';
+            tradeLog.amount = decision.amount || '0';
+            tradeLog.tokenInDecimals = tradeResult?.tokenInDecimals || 0;
+            tradeLog.tokenOutDecimals = tradeResult?.tokenOutDecimals || 0;
+            tradeLog.amountIn = tradeResult?.amountIn || '0';
+            tradeLog.minAmountOut = tradeResult?.minAmountOut || '0';
+            tradeLog.actualAmountOut = tradeResult?.actualAmountOut || '0';
+            tradeLog.txHash = tradeResult?.txHash || null;
+            tradeLog.gasUsed = tradeResult?.gasUsed || null;
+            tradeLog.error = errorMessage || null;
 
-            await logTradeExecution(tradeLog);
-            processedIds.push(log.id);
+            // Stringify decision object to avoid constraint error
+            tradeLog.decision = JSON.stringify(decision);
+
+            try {
+                await tradeExecutionLogRepo.save(tradeLog);
+                logger.info(`📝 Saved trade execution log: ${tradeLog.id}`);
+            } catch (saveError) {
+                logger.error(`❌ Failed to save trade log: ${saveError}`);
+                // Fallback to console logging if DB save fails
+                console.error('Trade Log Data:', tradeLog);
+            }
+
+            // Log to GraphQL
+            try {
+                await logTradeToGraphQL(tradeLog);
+            } catch (graphQLError) {
+                logger.error(`❌ Failed to log trade to GraphQL: ${graphQLError}`);
+            }
+
+            // Mark as processed only if we have a valid trade result or hold decision
+            if (decisionStatus === 'executed' || decisionStatus === 'skipped') {
+                try {
+                    const processed = new ProcessedTrigger();
+                    processed.id = `trade-${log.id}`;
+                    await processedTriggerRepo.save(processed);
+                    logger.info(`✅ Marked log as processed: trade-${log.id}`);
+                } catch (markError) {
+                    logger.error(`❌ Failed to mark log as processed: ${markError}`);
+                }
+            } else {
+                logger.warn(`⚠️ Not marking invalid log as processed: ${log.id}`);
+            }
         }
 
-        await withFileLock(PROCESSED_FILE, async () => {
-            await writeFile(PROCESSED_FILE, JSON.stringify(processedIds, null, 2));
-        });
-
-        logger.info(`✅ Processed ${newLogs.length} logs`);
+        logger.info(`✅ Processed ${unprocessedLogs.length} logs`);
     } catch (error) {
         logger.error('❌❌❌ Log processing failed:', error);
     }
 }
 
 // ======================
-// Main Application
+// Health Server Setup
+// ======================
+async function startHealthServer() {
+    const healthApp = express();
+    healthApp.use(cors());
+
+    healthApp.get('/health', async (_, res) => {
+        const dbStatus = AppDataSource.isInitialized ? "connected" : "disconnected";
+        const status = dbStatus === "connected" ? "ok" : "degraded";
+
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.json({
+            status,
+            services: ['trade-executor'],
+            database: dbStatus
+        });
+    });
+
+    const PORT = 3001;
+    const server = healthApp.listen(PORT, () => {
+        logger.info(`✅ Trade Executor health server running on port ${PORT}`);
+    });
+
+    return server;
+}
+
+// ======================
+// Main Execution
 // ======================
 async function main() {
     logger.info('🚀 Starting Trade Executor');
-    await setupEnvironment();
 
-    // Setup WebSocket server
-    const wss = await setupWebSocketServer();
-    connectToWebSocketServer();
+    try {
+        await initializeDatabase();
+        await setupEnvironment();
 
-    const code = await provider.getCode(CONFIG.executorAddress);
-    if (code === '0x') {
-        throw new Error(`❌ No contract at ${CONFIG.executorAddress}`);
-    }
+        const healthServer = await startHealthServer();
 
-    // Initial processing
-    await processLogs();
-
-    // Periodic processing
-    const interval = setInterval(async () => {
-        logger.info('\n🔄 Periodic log check');
+        // Initial processing
         await new Promise(resolve => setTimeout(resolve, CONFIG.processingDelay));
         await processLogs();
-    }, 15000);
 
-    process.on('SIGINT', async () => {
-        clearInterval(interval);
-        if (wsClient) {
-            wsClient.close();
-        }
-        if (wss) {
-            wss.close();
-        }
-        if (allocatedWsPort) {
-            releasePort(allocatedWsPort);
-        }
-        logger.info('\n🛑 Trade executor stopped');
-        process.exit(0);
-    });
+        // Periodic processing
+        const interval = setInterval(async () => {
+            logger.info('\n🔄 Periodic log check');
+            await processLogs();
+        }, 15000);
+
+        // Graceful shutdown
+        process.on('SIGINT', async () => {
+            clearInterval(interval);
+            logger.info('\n🛑 Shutting down servers...');
+            healthServer.close(() => {
+                logger.info('🛑 Trade executor stopped');
+                process.exit(0);
+            });
+        });
+    } catch (err) {
+        logger.error('Fatal error in trade executor:', err);
+        process.exit(1);
+    }
 }
 
-main().catch(err => {
-    logger.error('Fatal error in trade executor:', err);
-    process.exit(1);
-});
+main();

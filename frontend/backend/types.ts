@@ -1,83 +1,63 @@
-// ... existing imports ...
-
-// Add a new type for API endpoints
-type LogApiEndpoint = "venice" | "price-detections" | "trade-execution" | "logs";
-
-// Update LogSource to match backend values
-type LogSource = "venice" | "price-detections" | "trade-execution";
-type LogStatus = "pending" | "completed" | "failed" | "error" | "executed" | "skipped" | "invalid";
+// Remove Venice-related types since they're not in backend
+type LogStatus = "pending" | "completed" | "failed" | "executed" | "skipped";
+type LogSource = "price-detections" | "trade-execution";
 
 interface BaseLogEntry {
     id: string;
     createdAt: string;
     status: LogStatus;
-    txHash?: string;
-    blockNumber?: number;
     error?: string;
-    source?: LogSource;
-    timestamp?: string;
 }
 
 export interface PriceDetectionLogEntry extends BaseLogEntry {
+    // Fields from backend entity
     type: "price-detections";
     priceContext: string;
-    decision: string;  // Add this missing property
-    decisionLength?: number;
-    eventTxHash?: string;
-    eventBlockNumber?: number;
-    fgi?: number;
-    fgiClassification?: string;
-    spikePercent?: number;
+    decision: string;
+    decisionLength: number;
+    spikePercent: number;
+    tokenIn: string;
+    tokenOut: string;
+    confidence: string;
+    amount: string;
+    eventTxHash: string;
+    eventBlockNumber: number;
+    fgi?: number | null;
+    fgiClassification?: string | null;
+
+    // Optional fields that might be present
+    reasoning?: string;
+    timestamp?: string;
     actualAmountOut?: string;
     gasUsed?: string;
-    success?: boolean;
-    tokenIn?: string;
-    tokenOut?: string;
-    buyVolatile?: boolean;
-    amountInWei?: string;
-    minAmountOut?: string;
-    reasoning?: string;
-    confidence?: "high" | "medium" | "low";  // Add this
-}
-
-export interface VeniceLogEntry extends BaseLogEntry {
-    type: "venice";
-    prompt: string;
-    response?: string;
-    confidence?: "high" | "medium" | "low";
-    slippage?: number;
-    tokenIn?: string;
-    tokenOut?: string;
-    amount?: string;
 }
 
 export interface TradeExecutionLog extends BaseLogEntry {
-    tokenOutDecimals: number;
-    tokenInDecimals: number;
-    amountIn: string;
-    minAmountOut: string;
-    actualAmountOut?: string;
+    // Fields from backend entity
     type: "trade-execution";
     source: "trade-execution";
-    timestamp: string;
     sourceLogId: string;
-    sourceType: 'venice' | 'price-detections';
+    sourceType: "price-detections";
     tokenIn: string;
     tokenOut: string;
     amount: string;
-    gasUsed?: string;
-    decision: TradingDecision;  // Now properly defined
+    tokenInDecimals: number;
+    tokenOutDecimals: number;
+    amountIn?: string | null;
+    minAmountOut?: string | null;
+    actualAmountOut?: string | null;
+    txHash?: string | null;
+    gasUsed?: string | null;
+
+    // Optional fields
+    timestamp?: string;
 }
 
-export type LogEntry = PriceDetectionLogEntry | VeniceLogEntry | TradeExecutionLog;
+export type LogEntry = PriceDetectionLogEntry | TradeExecutionLog;
 
 // Type guards
 export function isPriceDetectionLog(log: LogEntry): log is PriceDetectionLogEntry {
     return log.type === "price-detections";
-}
-
-export function isVeniceLog(log: LogEntry): log is VeniceLogEntry {
-    return log.type === "venice";
 }
 
 export function isTradeExecutionLog(log: LogEntry): log is TradeExecutionLog {
@@ -95,28 +75,12 @@ export interface TradingDecision {
     confidence?: 'high' | 'medium' | 'low';
 }
 
-export type ApiDebugEntry = {
-    id: string;
-    timestamp: string;
-    prompt: string;
-    rawResponse: string;
-    parsedDecision: TradingDecision;
-    error?: string;
-};
-
-export interface PromptConfig {
-    system: string;
-    instructions: string;
-    token_mapping: Record<string, string>;
-    market_context: Record<string, any>;
-}
-
 export interface MarketContext {
     fgi: number;
     fgi_classification: string;
-    obv_value: number;
-    obv_trend: string;
-    rl_insights: any[];
+    obv_value?: number;
+    obv_trend?: string;
+    rl_insights?: any[];
     timestamp: string;
     price_event?: {
         type: string;

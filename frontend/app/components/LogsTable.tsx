@@ -10,24 +10,25 @@ const getLogDate = (log: LogEntry) => {
     return new Date(log.createdAt);
 };
 
-interface LogsTableProps {
-    logs: LogEntry[];
+interface LogsTableProps<T extends LogEntry> {
+    logs: T[];
     expandedLogId: string | null;
     toggleLogExpansion: (id: string) => void;
     columns: {
         header: string;
-        accessor: (log: LogEntry) => React.ReactNode;
+        accessor: (log: T) => React.ReactNode;
     }[];
-    renderExpandedRow: (log: LogEntry) => React.ReactNode;
+    renderExpandedRow: (log: T) => React.ReactNode;
 }
 
-export default function LogsTable({
-    logs,
-    expandedLogId,
-    toggleLogExpansion,
-    columns,
-    renderExpandedRow
-}: LogsTableProps) {
+export default function LogsTable<T extends LogEntry>(props: LogsTableProps<T>) {
+    const {
+        logs,
+        expandedLogId,
+        toggleLogExpansion,
+        columns,
+        renderExpandedRow
+    } = props;
     // Helper function to get log type
     const getLogType = (log: LogEntry) => {
         if (isPriceTriggerLogEntry(log)) return 'price-detections';

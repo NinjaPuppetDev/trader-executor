@@ -36,11 +36,9 @@ anvil
 
 make deploy
 
-# -- websocket --
+# -- Run Graphql --
 
-make run-trade-ws-server
-
-make run-price-ws-server
+run-graphql-gateway
 
 
 # -- Services --
@@ -55,7 +53,7 @@ make run-portfolio-monitor
 
 make run-trainer
 
-make run-price-updater
+make run-price-updater 
 
 # -- Development Tools --
 

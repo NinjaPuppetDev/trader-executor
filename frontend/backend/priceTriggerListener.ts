@@ -1,39 +1,27 @@
 import { ethers } from "ethers";
 import { fetchTradingSignal } from "../app/utils/venice";
 import PriceTriggerAbi from "../app/abis/PriceTrigger.json";
-import fs from "fs";
-import path from "path";
 import dotenv from "dotenv";
-import { lock } from 'proper-lockfile';
 import { generatePromptConfig } from "./prompts/promptService";
 import { getFearAndGreedIndex } from "./utils/fgiService";
-import WebSocket from 'isomorphic-ws';
-import http from 'http';
-import { getWsServerPort } from './priceTriggerWsServer';
-
+import { GraphQLClient, gql } from 'graphql-request';
+import express from "express";
+import cors from 'cors';
+import "reflect-metadata";
+import { DataSource } from "typeorm";
 import {
-    PriceDetectionLogEntry,
-    TradingDecision as TradingDecisionType,
-    ApiDebugEntry
-} from './types';
-import { allocatePort } from "./shared/portManager";
+    PriceDetectionLog,
+    ProcessedTrigger,
+    ApiDebugLog
+} from "../backend/shared/entities";
+import { AppDataSource } from "../backend/shared/database";
 
 dotenv.config();
 
+// ======================
 // Configuration
-const DETECTION_LOG_FILE = path.join(__dirname, "logs", "price-detections.json");
-const DEBUG_LOG_FILE = path.join(__dirname, "logs", "api-debug.json");
-const PROCESSED_LOG_FILE = path.join(__dirname, "logs", "processed-triggers.json");
-const MAX_LOG_ENTRIES = 100;
+// ======================
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-
-
-// WebSocket configuration
-
-const WS_RECONNECT_INTERVAL = 5000;  // 5 seconds
-const WS_MAX_RETRIES = 5;
-
-// Token addresses from deployment
 const STABLE_TOKEN = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
 const VOLATILE_TOKEN = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
 const STABLE_TOKEN_CHECKSUM = ethers.utils.getAddress(STABLE_TOKEN);
@@ -43,22 +31,20 @@ const CONFIG = {
     VENICE_API_KEY: process.env.VENICE_API_KEY || "",
     RPC_URL: process.env.RPC_URL || "http://127.0.0.1:8545",
     PRICE_TRIGGER_ADDRESS: process.env.PRICE_TRIGGER_ADDRESS || "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318",
-    DEBUG: true
+    DEBUG: true,
+    GRAPHQL_ENDPOINT: process.env.GRAPHQL_ENDPOINT || "http://localhost:4000/graphql",
+    EVENT_COOLDOWN: 30000 // 30 seconds
 };
 
+// ======================
+// Price Trigger Listener
+// ======================
 class PriceTriggerListener {
-    private healthServer: http.Server | undefined;
-    private isHealthy: boolean;
-    private lastHeartbeat: number;
-    private heartbeatInterval: NodeJS.Timeout | undefined;
-    private readonly HEARTBEAT_INTERVAL = 30000; // 30 seconds
     private provider: ethers.providers.JsonRpcProvider;
     private priceTriggerContract: ethers.Contract;
-    private isProcessing: boolean;
+    private graphQLClient: GraphQLClient;
+    private isProcessing: boolean = false;
     private lastEventTime: number = 0;
-    private readonly EVENT_COOLDOWN = 30000; // 30 seconds
-    private wsClient: WebSocket | null = null;
-    private wsConnectionAttempts = 0;
 
     constructor() {
         this.provider = new ethers.providers.JsonRpcProvider(CONFIG.RPC_URL);
@@ -67,192 +53,17 @@ class PriceTriggerListener {
             PriceTriggerAbi,
             this.provider
         );
-        this.isProcessing = false;
-
-        this.isHealthy = true;
-        this.lastHeartbeat = Date.now();
-        this.setupHealthServer();
-        this.startHeartbeatMonitor();
-
-        this.ensureLogsDirectory();
-        this.validateLogFiles();
-        this.cleanupStaleLocks();
-        this.connectToWebSocketServer();
+        this.graphQLClient = new GraphQLClient(CONFIG.GRAPHQL_ENDPOINT);
+        this.initializeDatabase();
     }
 
-    private async setupHealthServer() {
+    private async initializeDatabase() {
         try {
-            // Use a unique service name for health port
-            const healthPort = await allocatePort('priceTriggerListenerHealth');
-            this.healthServer = http.createServer((req, res) => {
-                if (req.url === '/health') {
-                    res.writeHead(this.isHealthy ? 200 : 500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({
-                        healthy: this.isHealthy,
-                        wsConnected: this.wsClient?.readyState === WebSocket.OPEN
-                    }));
-                } else {
-                    res.writeHead(404);
-                    res.end();
-                }
-            });
-
-            this.healthServer.listen(healthPort, () => {
-                this.log(`🩺 Health server listening on port ${healthPort}`);
-            });
-        } catch (err) {
-            this.error("Failed to start health server", err);
-        }
-    }
-
-    private startHeartbeatMonitor() {
-        this.heartbeatInterval = setInterval(() => {
-            // Check WebSocket connection health
-            const now = Date.now();
-            const timeSinceLastHeartbeat = now - this.lastHeartbeat;
-
-            if (timeSinceLastHeartbeat > this.HEARTBEAT_INTERVAL * 2) {
-                this.isHealthy = false;
-                this.error("Heartbeat failure",
-                    `No heartbeat for ${Math.floor(timeSinceLastHeartbeat / 1000)} seconds`);
-
-                // Attempt to restart WebSocket connection
-                if (this.wsClient && this.wsClient.readyState !== WebSocket.OPEN) {
-                    this.log("♻️ Restarting WebSocket connection due to heartbeat failure");
-                    this.connectToWebSocketServer();
-                }
-            } else {
-                this.isHealthy = true;
-            }
-
-            // Send heartbeat to WebSocket server
-            if (this.wsClient && this.wsClient.readyState === WebSocket.OPEN) {
-                try {
-                    this.wsClient.send(JSON.stringify({ type: 'heartbeat', timestamp: now }));
-                    this.debugLog(`❤️ Sent heartbeat to WebSocket server`);
-                } catch (err) {
-                    this.error("Heartbeat send failed", err);
-                }
-            }
-
-            this.lastHeartbeat = now;
-        }, this.HEARTBEAT_INTERVAL);
-    }
-
-    private async connectToWebSocketServer() {
-        const getPortWithRetry = async (attempt = 1): Promise<number> => {
-            const maxAttempts = 10;
-            const port = getWsServerPort();
-
-            if (port) {
-                this.debugLog(`Discovered WebSocket server port: ${port}`);
-                return port;
-            }
-
-            if (attempt > maxAttempts) {
-                throw new Error("Could not discover WebSocket server port");
-            }
-
-            const delay = Math.min(attempt * 2000, 10000);
-            this.log(`⌛ Waiting for WebSocket server (attempt ${attempt}/${maxAttempts})`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            return getPortWithRetry(attempt + 1);
-        };
-
-        try {
-            const port = await getPortWithRetry();
-            this.wsClient = new WebSocket(`ws://localhost:${port}/`); // Add trailing slash
-
-            this.wsClient.on('open', () => {
-                this.wsConnectionAttempts = 0;
-                this.log(`🔌 Connected to WebSocket server on port ${port}`);
-            });
-
-            this.wsClient.on('error', (err: any) => {
-                this.error("WebSocket connection error", err);
-                this.handleWsReconnect();
-            });
-
-            this.wsClient.on('close', () => {
-                this.log("WebSocket connection closed");
-                this.handleWsReconnect();
-            });
-
-            this.wsClient.on('message', (data: WebSocket.Data) => {
-                try {
-                    if (typeof data === 'string') {
-                        const message = JSON.parse(data);
-                        if (message.type === 'heartbeat') {
-                            this.lastHeartbeat = Date.now();
-                            return;
-                        }
-                    }
-                } catch (err) {
-                    this.debugLog("Non-JSON message received");
-                }
-            });
-        } catch (err) {
-            this.error("Failed to connect to WebSocket server", err);
-            this.handleWsReconnect();
-        }
-    }
-
-    private handleWsReconnect() {
-        this.wsConnectionAttempts++;
-        if (this.wsConnectionAttempts <= WS_MAX_RETRIES) {
-            const delay = Math.min(WS_RECONNECT_INTERVAL * this.wsConnectionAttempts, 30000);
-            this.log(`♻️ Reconnecting in ${delay / 1000} seconds (attempt ${this.wsConnectionAttempts}/${WS_MAX_RETRIES})`);
-            setTimeout(() => this.connectToWebSocketServer(), delay);
-        } else {
-            this.error("❌ Maximum WebSocket connection attempts reached", "");
-        }
-    }
-
-    private cleanup() {
-        clearInterval(this.heartbeatInterval);
-        if (this.healthServer) {
-            this.healthServer.close();
-        }
-    }
-
-    private ensureLogsDirectory() {
-        const logDir = path.dirname(DETECTION_LOG_FILE);
-        if (!fs.existsSync(logDir)) {
-            fs.mkdirSync(logDir, { recursive: true });
-        }
-    }
-
-
-
-
-    private validateLogFiles() {
-        // Validate detections log
-        if (!fs.existsSync(DETECTION_LOG_FILE)) {
-            fs.writeFileSync(DETECTION_LOG_FILE, "[]");
-        } else {
-            this.validateJsonFile(DETECTION_LOG_FILE);
-        }
-
-        // Initialize processed triggers log
-        if (!fs.existsSync(PROCESSED_LOG_FILE)) {
-            fs.writeFileSync(PROCESSED_LOG_FILE, JSON.stringify({ ids: [] }));
-        }
-
-        // Initialize API debug log
-        if (!fs.existsSync(DEBUG_LOG_FILE)) {
-            fs.writeFileSync(DEBUG_LOG_FILE, "[]");
-        }
-    }
-
-    private validateJsonFile(filePath: string) {
-        try {
-            const content = fs.readFileSync(filePath, "utf-8").trim();
-            if (content && !content.startsWith("[") && !content.startsWith("{")) {
-                this.log(`⚠️ Invalid format in ${path.basename(filePath)}, resetting file`);
-                fs.writeFileSync(filePath, filePath === DETECTION_LOG_FILE ? "[]" : "{}");
-            }
-        } catch (err) {
-            this.error("Log validation error", err);
+            await AppDataSource.initialize();
+            this.log("✅ Database connected");
+        } catch (error) {
+            this.error("Database initialization failed", error);
+            process.exit(1);
         }
     }
 
@@ -262,7 +73,6 @@ class PriceTriggerListener {
         this.log(`🔑 Stable Token: ${STABLE_TOKEN_CHECKSUM}`);
         this.log(`🔑 Volatile Token: ${VOLATILE_TOKEN_CHECKSUM}`);
 
-
         try {
             const network = await this.provider.getNetwork();
             this.log(`⛓️ Connected to: ${network.name} (ID: ${network.chainId})`);
@@ -271,8 +81,6 @@ class PriceTriggerListener {
             this.error("Initialization failed", error);
             process.exit(1);
         }
-
-        await this.connectToWebSocketServer();
     }
 
     private setupEventListeners() {
@@ -280,7 +88,6 @@ class PriceTriggerListener {
             const filter = this.priceTriggerContract.filters.PriceSpikeDetected();
 
             this.priceTriggerContract.on(filter, async (...args: any[]) => {
-                // Check processing status
                 if (this.isProcessing) {
                     this.log("⚠️ Skipping event - processing in progress");
                     return;
@@ -288,7 +95,7 @@ class PriceTriggerListener {
 
                 // Check cooldown
                 const now = Date.now();
-                if (now - this.lastEventTime < this.EVENT_COOLDOWN) {
+                if (now - this.lastEventTime < CONFIG.EVENT_COOLDOWN) {
                     this.log("⏳ Cooldown active - skipping event");
                     return;
                 }
@@ -330,6 +137,14 @@ class PriceTriggerListener {
         const eventId = `spike-${Date.now()}`;
         const startTime = Date.now();
 
+        // Check if event already processed
+        const processedExists = await AppDataSource.getRepository(ProcessedTrigger).findOneBy({ id: eventId });
+        if (processedExists) {
+            this.log(`⏭️ Event already processed: ${eventId}`);
+            this.isProcessing = false;
+            return;
+        }
+
         // Convert prices
         const currentPriceNum = parseFloat(ethers.utils.formatUnits(currentPrice, 8));
         const previousPriceNum = parseFloat(ethers.utils.formatUnits(previousPrice, 8));
@@ -370,133 +185,119 @@ class PriceTriggerListener {
             const signal = await this.fetchTradingSignal(promptString, eventId);
             const tradingDecision = this.parseTradingDecision(signal, eventId);
 
-            // Create log entry AFTER getting decision
-            const logEntry: PriceDetectionLogEntry = {
-                id: eventId,
-                type: 'price-detections',
-                timestamp: new Date().toISOString(),
-                priceContext: `Spike: ${changePercentNum.toFixed(2)}% | Current: $${currentPriceNum} | Previous: $${previousPriceNum}`,
-                decision: JSON.stringify(tradingDecision),
-                decisionLength: JSON.stringify(tradingDecision).length,
-                status: "completed",
-                createdAt: new Date().toISOString(),
-                spikePercent: changePercentNum,
-                eventTxHash: event.transactionHash,
-                eventBlockNumber: event.blockNumber,
-                fgi: fgiData.value,
-                fgiClassification: fgiData.classification,
-                tokenIn: tradingDecision.tokenIn,
-                tokenOut: tradingDecision.tokenOut,
-                confidence: tradingDecision.confidence
-            };
+            // Create and save log entry
+            const logEntry = new PriceDetectionLog();
+            logEntry.id = eventId;
+            logEntry.timestamp = new Date().toISOString();
+            logEntry.priceContext = `Spike: ${changePercentNum.toFixed(2)}% | Current: $${currentPriceNum} | Previous: $${previousPriceNum}`;
+            logEntry.decision = JSON.stringify(tradingDecision);
+            logEntry.decisionLength = JSON.stringify(tradingDecision).length;
+            logEntry.status = "completed";
+            logEntry.createdAt = new Date().toISOString();
+            logEntry.spikePercent = changePercentNum;
+            logEntry.eventTxHash = event.transactionHash;
+            logEntry.eventBlockNumber = event.blockNumber;
+            logEntry.fgi = fgiData.value;
+            logEntry.fgiClassification = fgiData.classification;
+            logEntry.tokenIn = tradingDecision.tokenIn;
+            logEntry.tokenOut = tradingDecision.tokenOut;
+            logEntry.confidence = tradingDecision.confidence;
+            logEntry.amount = tradingDecision.amount;
 
-            await this.appendLog(logEntry);
-            this.broadcastPriceUpdate(logEntry);
-            await this.markAsProcessed(eventId);
+            await AppDataSource.manager.save(logEntry);
+            await this.logDetectionToGraphQL(logEntry);
+
+            // Mark as processed
+            const processed = new ProcessedTrigger();
+            processed.id = eventId;
+            await AppDataSource.manager.save(processed);
+
             this.log(`✅ Processing completed in ${Date.now() - startTime}ms`);
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Unknown error";
-
-            // Create error log entry
-            const logEntry: PriceDetectionLogEntry = {
-                id: eventId,
-                type: 'price-detections',
-                timestamp: new Date().toISOString(),
-                priceContext: `Spike: ${changePercentNum.toFixed(2)}% | Current: $${currentPriceNum} | Previous: $${previousPriceNum}`,
-                decision: "",
-                decisionLength: 0,
-                status: "failed",
-                createdAt: new Date().toISOString(),
-                error: errorMsg,
-                spikePercent: changePercentNum,
-                eventTxHash: event.transactionHash,
-                eventBlockNumber: event.blockNumber,
-                tokenIn: ZERO_ADDRESS,
-                tokenOut: ZERO_ADDRESS
-            };
-
-            await this.appendLog(logEntry);
             this.error("Processing failed", errorMsg);
+
+            // Create and save error log entry
+            const logEntry = new PriceDetectionLog();
+            logEntry.id = eventId;
+            logEntry.timestamp = new Date().toISOString();
+            logEntry.priceContext = `Spike: ${changePercentNum.toFixed(2)}% | Current: $${currentPriceNum} | Previous: $${previousPriceNum}`;
+            logEntry.decision = "";
+            logEntry.decisionLength = 0;
+            logEntry.status = "failed";
+            logEntry.createdAt = new Date().toISOString();
+            logEntry.error = errorMsg;
+            logEntry.spikePercent = changePercentNum;
+            logEntry.eventTxHash = event.transactionHash;
+            logEntry.eventBlockNumber = event.blockNumber;
+            logEntry.tokenIn = ZERO_ADDRESS;
+            logEntry.tokenOut = ZERO_ADDRESS;
+            logEntry.amount = '0';
+
+            await AppDataSource.manager.save(logEntry);
         } finally {
             this.isProcessing = false;
         }
     }
 
-
-    private broadcastPriceUpdate(log: PriceDetectionLogEntry) {
-        if (!this.wsClient || this.wsClient.readyState !== WebSocket.OPEN) {
-            this.log("⚠️ WebSocket not connected, skipping broadcast");
-            return;
+    private async logDetectionToGraphQL(log: PriceDetectionLog) {
+        const mutation = gql`
+        mutation LogDetection($entry: DetectionInput!) {
+            logDetection(entry: $entry)
         }
+    `;
 
         try {
-            const message = JSON.stringify({
-                type: 'logUpdate',
-                data: log
-            });
-            this.wsClient.send(message);
-            this.debugLog(`📤 Broadcasted update for ${log.id}`);
-        } catch (err) {
-            this.error("WebSocket send error", err);
-        }
-    }
-
-    private async markAsProcessed(id: string) {
-        try {
-            const release = await lock(PROCESSED_LOG_FILE, { retries: 5 });
-            let processed: { ids: string[] } = { ids: [] };
-
-            if (fs.existsSync(PROCESSED_LOG_FILE)) {
-                const content = fs.readFileSync(PROCESSED_LOG_FILE, "utf-8").trim();
-                processed = content ? JSON.parse(content) : { ids: [] };
-
-                // Ensure we have an array
-                if (!Array.isArray(processed.ids)) {
-                    processed.ids = [];
+            await this.graphQLClient.request(mutation, {
+                entry: {
+                    id: log.id,
+                    spikePercent: log.spikePercent,
+                    tokenIn: log.tokenIn,
+                    tokenOut: log.tokenOut,
+                    confidence: log.confidence || 'medium',
+                    amount: log.amount || '0',
+                    eventTxHash: log.eventTxHash,
+                    eventBlockNumber: log.eventBlockNumber,
+                    createdAt: log.createdAt,
+                    status: log.status,
+                    decision: log.decision || '',
+                    fgi: log.fgi,           // Add this
+                    fgiClassification: log.fgiClassification // Add this
                 }
-            }
-
-            if (!processed.ids.includes(id)) {
-                processed.ids.push(id);
-                fs.writeFileSync(PROCESSED_LOG_FILE, JSON.stringify(processed, null, 2));
-            }
-            if (release) await release();
+            });
+            this.log(`📤 Logged detection to GraphQL: ${log.id}`);
         } catch (error) {
-            this.error("Failed to mark as processed", error);
+            this.error('GraphQL detection log error:', error);
         }
     }
 
-    private parseTradingDecision(signal: string, eventId: string): TradingDecisionType {
+    private parseTradingDecision(signal: string, eventId: string) {
         this.debugLog(`Raw signal (${signal.length} chars): ${signal.substring(0, 300)}${signal.length > 300 ? '...' : ''}`);
 
-        // Create debug entry
-        const debugEntry: ApiDebugEntry = {
-            id: eventId,
-            timestamp: new Date().toISOString(),
-            prompt: "",
-            rawResponse: signal,
-            parsedDecision: {
-                decision: 'hold',
-                tokenIn: ZERO_ADDRESS,
-                tokenOut: ZERO_ADDRESS,
-                amount: "0",
-                slippage: 0,
-                reasoning: "Initial placeholder"
-            }
-        };
+        const debugEntry = new ApiDebugLog();
+        debugEntry.id = eventId;
+        debugEntry.timestamp = new Date().toISOString();
+        debugEntry.prompt = "";
+        debugEntry.rawResponse = signal;
+
+        // FIX: Always store parsedDecision as string
+        debugEntry.parsedDecision = JSON.stringify({
+            decision: 'hold',
+            tokenIn: ZERO_ADDRESS,
+            tokenOut: ZERO_ADDRESS,
+            amount: "0",
+            slippage: 0,
+            reasoning: "Initial placeholder"
+        });
 
         try {
-            // 1. Try to parse as JSON
             const decision = JSON.parse(signal);
             this.debugLog("✅ Successfully parsed JSON");
-
-            // Validate and normalize
             const validated = this.validateDecisionStructure(decision);
 
-            // Update debug entry
-            debugEntry.parsedDecision = validated;
-            this.appendDebugLog(debugEntry);
-
+            // FIX: Stringify before saving to debugEntry
+            debugEntry.parsedDecision = JSON.stringify(validated);
+            this.saveDebugLog(debugEntry);
             return validated;
         } catch (primaryError) {
             debugEntry.error = primaryError instanceof Error ? primaryError.message : 'JSON parse failed';
@@ -504,21 +305,17 @@ class PriceTriggerListener {
         }
 
         try {
-            // 2. Try bracket matching
             const startIndex = signal.indexOf('{');
             const endIndex = signal.lastIndexOf('}');
             if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
                 const candidate = signal.substring(startIndex, endIndex + 1);
                 const parsed = JSON.parse(candidate);
                 this.debugLog(`✅ Extracted JSON with bracket matching`);
-
-                // Validate and normalize
                 const validated = this.validateDecisionStructure(parsed);
 
-                // Update debug entry
-                debugEntry.parsedDecision = validated;
-                this.appendDebugLog(debugEntry);
-
+                // FIX: Stringify before saving to debugEntry
+                debugEntry.parsedDecision = JSON.stringify(validated);
+                this.saveDebugLog(debugEntry);
                 return validated;
             }
         } catch (bracketError) {
@@ -526,46 +323,55 @@ class PriceTriggerListener {
             this.debugLog(`Bracket matching failed`);
         }
 
-        // 3. Final fallback
         this.debugLog("❌ All parsing methods failed");
-        const fallbackDecision: TradingDecisionType = {
+        const fallbackDecision = {
             decision: 'hold',
             tokenIn: ZERO_ADDRESS,
             tokenOut: ZERO_ADDRESS,
             amount: "0",
             slippage: 0,
-            reasoning: "FALLBACK: Could not parse decision"
+            reasoning: "FALLBACK: Could not parse decision",
+            confidence: "medium"
         };
 
-        // Update debug entry
-        debugEntry.parsedDecision = fallbackDecision;
+        // FIX: Stringify fallback before saving
+        debugEntry.parsedDecision = JSON.stringify(fallbackDecision);
         debugEntry.error = "All parsing methods failed";
-        this.appendDebugLog(debugEntry);
-
+        this.saveDebugLog(debugEntry);
         return fallbackDecision;
     }
 
-    private validateDecisionStructure(decision: any): TradingDecisionType {
+    private async saveDebugLog(entry: ApiDebugLog) {
+        if (!CONFIG.DEBUG) return;
+
+        try {
+            const debugLogRepo = AppDataSource.getRepository(ApiDebugLog);
+            await debugLogRepo.save(entry);
+            this.debugLog(`📝 Debug log saved: ${entry.id}`);
+        } catch (error) {
+            this.debugLog(`❌ Failed to save debug log to DB: ${error}`);
+            this.debugLog(`[DebugLog] ${JSON.stringify(entry)}`);
+        }
+    }
+
+    private validateDecisionStructure(decision: any) {
         if (!decision || typeof decision !== 'object') {
             throw new Error("Decision must be a valid object");
         }
 
-        // Helper function to validate and normalize addresses
         const normalizeAddress = (addr: string): string => {
             try {
                 return ethers.utils.getAddress(addr);
             } catch {
-                return addr; // Return original for better error messages
+                return addr;
             }
         };
 
-        // Normalize decision field
         const action = decision.decision?.toString().toLowerCase().trim();
         if (!action || !['buy', 'sell', 'hold'].includes(action)) {
             throw new Error(`Invalid decision type: ${decision.decision}`);
         }
 
-        // Handle HOLD decisions
         if (action === "hold") {
             return {
                 decision: "hold",
@@ -578,19 +384,9 @@ class PriceTriggerListener {
             };
         }
 
-        // Validate token addresses
         let tokenIn = decision.tokenIn ? normalizeAddress(decision.tokenIn) : '';
         let tokenOut = decision.tokenOut ? normalizeAddress(decision.tokenOut) : '';
 
-        // Validate token pair
-        const validTokens = [STABLE_TOKEN_CHECKSUM, VOLATILE_TOKEN_CHECKSUM];
-        if (!validTokens.includes(tokenIn) || !validTokens.includes(tokenOut)) {
-            throw new Error(
-                `Invalid token pair. Valid tokens: ${STABLE_TOKEN_CHECKSUM}, ${VOLATILE_TOKEN_CHECKSUM}`
-            );
-        }
-
-        // Auto-correct token direction
         if (action === 'buy') {
             if (tokenIn === VOLATILE_TOKEN_CHECKSUM && tokenOut === STABLE_TOKEN_CHECKSUM) {
                 [tokenIn, tokenOut] = [tokenOut, tokenIn];
@@ -601,7 +397,6 @@ class PriceTriggerListener {
             }
         }
 
-        // Validate token pair direction
         if (action === 'buy') {
             if (tokenIn !== STABLE_TOKEN_CHECKSUM || tokenOut !== VOLATILE_TOKEN_CHECKSUM) {
                 throw new Error(
@@ -616,7 +411,6 @@ class PriceTriggerListener {
             }
         }
 
-        // Validate amount
         const amountStr = decision.amount?.toString() || "0";
         const amount = parseFloat(amountStr);
         if (isNaN(amount)) {
@@ -626,7 +420,6 @@ class PriceTriggerListener {
             throw new Error(`Trade amount must be positive: ${amount}`);
         }
 
-        // Amount validation based on confidence level
         const confidence = decision.confidence || 'medium';
         let maxAmount = 0.025;
 
@@ -639,13 +432,10 @@ class PriceTriggerListener {
             );
         }
 
-        // Validate and normalize slippage
         let slippage = parseFloat(decision.slippage?.toString() || "1");
         if (isNaN(slippage)) {
             slippage = 1;
         }
-
-        // Clamp between 0.1% and 5%
         slippage = Math.min(Math.max(slippage, 0.1), 5);
         slippage = parseFloat(slippage.toFixed(2));
 
@@ -699,21 +489,20 @@ class PriceTriggerListener {
         this.log("📡 Calling Venice API with populated prompt...");
         this.debugLog(`Prompt: ${prompt.substring(0, 200)}...`);
 
-        // Create debug entry
-        const debugEntry: ApiDebugEntry = {
-            id: eventId,
-            timestamp: new Date().toISOString(),
-            prompt: prompt,
-            rawResponse: "",
-            parsedDecision: {
-                decision: 'hold',
-                tokenIn: ZERO_ADDRESS,
-                tokenOut: ZERO_ADDRESS,
-                amount: "0",
-                slippage: 0,
-                reasoning: "Initial placeholder"
-            }
-        };
+        const debugEntry = new ApiDebugLog();
+        debugEntry.id = eventId;
+        debugEntry.timestamp = new Date().toISOString();
+        debugEntry.prompt = prompt;
+
+        // FIX: Store parsedDecision as string
+        debugEntry.parsedDecision = JSON.stringify({
+            decision: 'hold',
+            tokenIn: ZERO_ADDRESS,
+            tokenOut: ZERO_ADDRESS,
+            amount: "0",
+            slippage: 0,
+            reasoning: "Initial placeholder"
+        });
 
         try {
             if (!CONFIG.VENICE_API_KEY) {
@@ -727,10 +516,7 @@ class PriceTriggerListener {
                 throw new Error(`API returned non-string response: ${typeof rawSignal}`);
             }
 
-            // Full response logging for debugging
             this.debugLog(`Full API response: ${rawSignal}`);
-
-            // Basic validation
             const hasDecision = /"decision"\s*:\s*["']?(buy|sell|hold)["']?/i.test(rawSignal);
             const hasTokenIn = /"tokenIn"\s*:\s*["']?0x[a-fA-F0-9]{40}["']?/i.test(rawSignal);
 
@@ -741,8 +527,7 @@ class PriceTriggerListener {
 
             return rawSignal;
         } catch (err) {
-            // Create fallback
-            const fallback: TradingDecisionType = {
+            const fallback = {
                 reasoning: "Error: Failed to fetch valid signal",
                 decision: "hold",
                 tokenIn: ZERO_ADDRESS,
@@ -753,171 +538,20 @@ class PriceTriggerListener {
             };
 
             const fallbackString = JSON.stringify(fallback);
-
-            // Update debug entry with error
             debugEntry.error = err instanceof Error ? err.message : "Unknown error";
-            debugEntry.parsedDecision = fallback;
-            this.appendDebugLog(debugEntry);
 
+            // FIX: Stringify fallback before storing
+            debugEntry.parsedDecision = JSON.stringify(fallback);
+            await this.saveDebugLog(debugEntry);
             this.error("API processing failed", err);
             return fallbackString;
         } finally {
-            // Always save debug entry
-            this.appendDebugLog(debugEntry);
+            await this.saveDebugLog(debugEntry);
         }
-    }
-
-    private async appendLog(entry: PriceDetectionLogEntry) {
-        const lockFile = `${DETECTION_LOG_FILE}.lock`;
-        const MAX_WAIT_TIME = 5000; // 5 seconds max wait
-        const startTime = Date.now();
-
-        // Wait for lock to be released
-        while (fs.existsSync(lockFile)) {
-            if (Date.now() - startTime > MAX_WAIT_TIME) {
-                console.error("❌ Lock timeout exceeded for appendLog");
-                return;
-            }
-            await new Promise(resolve => setTimeout(resolve, 50));
-        }
-
-        try {
-            // Create lock file
-            fs.writeFileSync(lockFile, process.pid.toString(), { flag: 'wx' });
-
-            let logs: PriceDetectionLogEntry[] = [];
-            const logExists = fs.existsSync(DETECTION_LOG_FILE);
-
-            if (logExists) {
-                try {
-                    const content = fs.readFileSync(DETECTION_LOG_FILE, 'utf-8').trim();
-                    logs = content ? JSON.parse(content) : [];
-                } catch (err) {
-                    console.error("Log read error, resetting file", err);
-                    logs = [];
-                }
-            }
-
-            // Find existing entry index
-            const existingIndex = logs.findIndex(log => log.id === entry.id);
-
-            if (existingIndex >= 0) {
-                // Update existing entry
-                logs[existingIndex] = entry;
-            } else {
-                // Prune oldest entries if needed
-                if (logs.length >= MAX_LOG_ENTRIES) {
-                    const excess = logs.length - MAX_LOG_ENTRIES + 1;
-                    logs = logs.slice(excess);
-                }
-                logs.push(entry);
-            }
-
-            // Write to file with error handling
-            try {
-                fs.writeFileSync(
-                    DETECTION_LOG_FILE,
-                    JSON.stringify(logs, null, 2),
-                    'utf-8'
-                );
-            } catch (writeErr) {
-                console.error("❌ Critical write failure", writeErr);
-            }
-        } catch (lockErr) {
-            console.error("Lock acquisition failed", lockErr);
-        } finally {
-            // Release lock
-            if (fs.existsSync(lockFile)) {
-                try {
-                    fs.unlinkSync(lockFile);
-                } catch (unlinkErr) {
-                    console.error("⚠️ Lock release failed", unlinkErr);
-                }
-            }
-        }
-    }
-
-    private async appendDebugLog(entry: ApiDebugEntry) {
-        if (!CONFIG.DEBUG) return;
-
-        const lockFile = `${DEBUG_LOG_FILE}.lock`;
-        const startTime = Date.now();
-
-        // Wait for lock
-        while (fs.existsSync(lockFile)) {
-            if (Date.now() - startTime > 3000) return; // 3s timeout
-            await new Promise(resolve => setTimeout(resolve, 30));
-        }
-
-        try {
-            // Create lock
-            fs.writeFileSync(lockFile, process.pid.toString(), { flag: 'wx' });
-
-            let logs: ApiDebugEntry[] = [];
-            if (fs.existsSync(DEBUG_LOG_FILE)) {
-                try {
-                    logs = JSON.parse(fs.readFileSync(DEBUG_LOG_FILE, 'utf-8'));
-                } catch (err) {
-                    console.error("Debug log reset", err);
-                }
-            }
-
-            // Update or add entry
-            const index = logs.findIndex(log => log.id === entry.id);
-            if (index >= 0) {
-                logs[index] = entry;
-            } else {
-                if (logs.length >= MAX_LOG_ENTRIES) {
-                    logs.shift(); // Remove oldest
-                }
-                logs.push(entry);
-            }
-
-            // Write to file
-            fs.writeFileSync(DEBUG_LOG_FILE, JSON.stringify(logs, null, 2));
-        } finally {
-            // Release lock
-            if (fs.existsSync(lockFile)) {
-                try {
-                    fs.unlinkSync(lockFile);
-                } catch (err) {
-                    console.error("Debug lock release error", err);
-                }
-            }
-        }
-    }
-
-    private cleanupStaleLocks() {
-        const lockFiles = [
-            `${DETECTION_LOG_FILE}.lock`,
-            `${DEBUG_LOG_FILE}.lock`,
-            `${PROCESSED_LOG_FILE}.lock`
-        ];
-
-        lockFiles.forEach(lockPath => {
-            if (fs.existsSync(lockPath)) {
-                try {
-                    const pid = parseInt(fs.readFileSync(lockPath, 'utf-8'));
-
-                    // Check if process is still running
-                    try {
-                        process.kill(pid, 0); // Test if process exists
-                    } catch (e) {
-                        // Process doesn't exist - remove stale lock
-                        fs.unlinkSync(lockPath);
-                        this.log(`♻️ Removed stale lock: ${lockPath}`);
-                    }
-                } catch (err) {
-                    console.error("Lock cleanup failed", err);
-                }
-            }
-        });
     }
 
     private log(message: string) {
-        if (CONFIG.DEBUG) {
-            console.log(`[${new Date().toISOString()}] ${message}`);
-        }
+        console.log(`[${new Date().toISOString()}] ${message}`);
     }
 
     private debugLog(message: string) {
@@ -932,13 +566,54 @@ class PriceTriggerListener {
     }
 }
 
+// ======================
+// Health Server Setup
+// ======================
+async function startHealthServer() {
+    const healthApp = express();
+    healthApp.use(cors());
 
-// Start the listener
-const listener = new PriceTriggerListener();
-listener.start();
+    healthApp.get('/health', async (_, res) => {
+        const dbStatus = AppDataSource.isInitialized ? "connected" : "disconnected";
+        const status = dbStatus === "connected" ? "ok" : "degraded";
 
-// Handle graceful shutdown
-process.on('SIGINT', () => {
-    console.log("\n🛑 Price trigger listener stopped");
-    process.exit(0);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.json({
+            status,
+            services: ['price-trigger'],
+            database: dbStatus
+        });
+    });
+
+    const PORT = 3002;
+    const server = healthApp.listen(PORT, () => {
+        console.log(`✅ Price Trigger health server running on port ${PORT}`);
+    });
+
+    return server;
+}
+
+// ======================
+// Main Execution
+// ======================
+async function main() {
+    const listener = new PriceTriggerListener();
+    const healthServer = await startHealthServer();
+
+    // Start the listener after health server is up
+    setTimeout(() => listener.start(), 1000);
+
+    // Graceful shutdown
+    process.on('SIGINT', async () => {
+        console.log("\n🛑 Shutting down servers...");
+        healthServer.close(() => {
+            console.log("🛑 Price trigger listener stopped");
+            process.exit(0);
+        });
+    });
+}
+
+main().catch(err => {
+    console.error('❌ Fatal error in price trigger:', err);
+    process.exit(1);
 });

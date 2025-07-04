@@ -1,6 +1,8 @@
+// app/layout.tsx
 import "./globals.css";
 import { ReactNode } from "react";
-import AIOracleInterface from "./AiOracleFrontend"; // adjust path if needed
+import ClientRoot from "../app/components/ClientRoot";
+
 
 export const metadata = {
   title: "AI Prompt Oracle",
@@ -11,11 +13,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body className="bg-gray-50 text-gray-900">
-        <main className="min-h-screen py-10 px-4">
-          {/* Render your component here */}
-
-          {children}
-        </main>
+        <ClientRoot>
+          <main className="min-h-screen py-10 px-4">
+            {children}
+          </main>
+        </ClientRoot>
       </body>
     </html>
   );

@@ -26,6 +26,10 @@ deploy-orchestrator:
 		--broadcast
 
 # -- Services --
+run-graphql-gateway:
+	@echo "Starting GraphQL Gateway..."
+	cd frontend && npx ts-node --project tsconfig.backend.json backend/graphql-gateway.ts
+
 run-upkeep-listener:
 	@echo "Starting upkeep listener..."
 	cd frontend && npx ts-node --project tsconfig.backend.json backend/veniceListenerMemory.ts
@@ -49,14 +53,6 @@ run-trainer:
 run-price-updater:
 	@echo "Starting price updater..."
 	cd frontend && npx ts-node --project tsconfig.backend.json backend/priceUpdaterService.ts
-
-run-trade-ws-server:
-	@echo "Starting Trade Executor WebSocket server..."
-	cd frontend && npx ts-node --project tsconfig.backend.json backend/tradeExecutorWsServer.ts
-
-run-price-ws-server:
-	@echo "Starting Price Trigger WebSocket server..."
-	cd frontend && npx ts-node --project tsconfig.backend.json backend/priceTriggerWsServer.ts
 
 # -- Simulations --
 simulate-up:
@@ -89,7 +85,9 @@ deploy-frontend:
 	@echo "Starting frontend..."
 	cd frontend && npm run dev
 
-
 clean:
 	@echo "Cleaning build artifacts..."
 	@forge clean
+
+# -- Service Management --
+run-all: run-graphql-gateway run-upkeep-listener run-price-trigger-listener run-trader run-portfolio-monitor run-trainer run-price-updater
