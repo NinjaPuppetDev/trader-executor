@@ -13,6 +13,7 @@ contract PriceTriggerTest is Test {
     uint256 constant SPIKE_THRESHOLD = 500; // 5%
     uint256 constant COOLDOWN = 60; // 60 seconds
     uint256 constant MAX_DATA_AGE = 3600;
+    uint256 constant PAIR_ID = 1;
 
     event PriceSpikeDetected(int256 currentPrice, int256 previousPrice, uint256 changePercent);
     event TradingDecisionGenerated(string decision);
@@ -22,7 +23,7 @@ contract PriceTriggerTest is Test {
         feed = new MockAggregatorV3(int256(INITIAL_PRICE));
 
         // Deploy trigger
-        trigger = new PriceTrigger(address(feed), SPIKE_THRESHOLD, COOLDOWN, MAX_DATA_AGE);
+        trigger = new PriceTrigger(address(feed), SPIKE_THRESHOLD, COOLDOWN, MAX_DATA_AGE, PAIR_ID);
     }
 
     function testAutomationFlow() public {

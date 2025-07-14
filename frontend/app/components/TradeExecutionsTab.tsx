@@ -7,9 +7,12 @@ import { gql, useQuery } from '@apollo/client';
 
 // Utility functions
 const formatUTCTime = (dateInput: string | number | Date): string => {
+    if (!dateInput) return 'Invalid date';
+
     try {
         const date = new Date(dateInput);
         if (isNaN(date.getTime())) return 'Invalid date';
+
         return date.toLocaleTimeString('en-US', {
             hour: '2-digit',
             minute: '2-digit',
@@ -26,6 +29,7 @@ const formatUTCTime = (dateInput: string | number | Date): string => {
 const STATUS_CONFIG = {
     executed: { className: 'text-green-400', color: 'bg-green-500', text: 'Executed' },
     skipped: { className: 'text-yellow-400', color: 'bg-yellow-500', text: 'Skipped' },
+    invalid: { className: 'text-red-400', color: 'bg-red-500', text: 'Invalid' },
     pending: { className: 'text-blue-400', color: 'bg-blue-500', text: 'Pending' },
     failed: { className: 'text-red-400', color: 'bg-red-500', text: 'Failed' },
     default: { className: 'text-gray-400', color: 'bg-gray-500', text: 'Unknown' },
@@ -40,14 +44,14 @@ const GET_TRADE_EXECUTIONS = gql`
             status
             tokenIn
             tokenOut
-            amount
+            amountIn
             tokenInDecimals
             tokenOutDecimals
             txHash
             gasUsed
-            amountIn
             minAmountOut
             actualAmountOut
+            priceImpact
             error
             createdAt
         }
@@ -86,7 +90,14 @@ const getTableColumns = (
                 <div className="flex flex-col">
                     <span>In: {formatAmount(log.amountIn, log.tokenInDecimals)}</span>
                     {log.actualAmountOut && (
-                        <span>Out: {formatAmount(log.actualAmountOut, log.tokenOutDecimals)}</span>
+                        <span className="flex items-center">
+                            Out: {formatAmount(log.actualAmountOut, log.tokenOutDecimals)}
+                            {log.priceImpact > 5 && (
+                                <span className="text-xs text-red-400 ml-2">
+                                    ⚠️ High Impact
+                                </span>
+                            )}
+                        </span>
                     )}
                 </div>
             )
@@ -132,18 +143,13 @@ export default function TradeExecutionsTab({
     const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
     const { getTokenMetadata } = useTokenMetadata();
 
-    // Apollo query with automatic polling
-    const { loading, error, data, startPolling, stopPolling } = useQuery(GET_TRADE_EXECUTIONS, {
+    // Apollo query with polling
+    const { loading, error, data } = useQuery(GET_TRADE_EXECUTIONS, {
+        pollInterval: 5000,
         fetchPolicy: "network-only",
         onCompleted: () => setConnectionStatus('connected'),
         onError: () => setConnectionStatus('disconnected'),
     });
-
-    // Setup and cleanup polling
-    useEffect(() => {
-        startPolling(5000);
-        return () => stopPolling();
-    }, [startPolling, stopPolling]);
 
     // Update logs when new data arrives
     useEffect(() => {
@@ -155,9 +161,7 @@ export default function TradeExecutionsTab({
                 );
 
                 if (newLogs.length > 0) {
-                    return [...newLogs, ...prev].sort((a, b) =>
-                        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-                    );
+                    return [...newLogs, ...prev];
                 }
                 return prev;
             });
@@ -165,24 +169,42 @@ export default function TradeExecutionsTab({
         }
     }, [data]);
 
-    // Handle initial connection status
+    // Handle connection status
     useEffect(() => {
         if (loading) setConnectionStatus('connecting');
-    }, [loading]);
+        if (error) setConnectionStatus('disconnected');
+    }, [loading, error]);
 
     // Memoized functions
     const getTokenSymbol = useCallback((address: string): string => {
         return getTokenMetadata(address)?.symbol || 'UNKNOWN';
     }, [getTokenMetadata]);
 
+    // Fixed amount formatting
     const formatAmount = useCallback((amount: string, decimals: number = 18): string => {
-        if (!amount || amount === '0') return '0.0000';
+        if (!amount || amount === '0') return '0';
+
         try {
-            const divisor = 10 ** (decimals || 18);
-            const formatted = parseFloat(amount) / divisor;
-            return formatted.toFixed(4);
+            // Convert to BigInt safely
+            const amountBigInt = BigInt(amount);
+            const divisor = BigInt(10 ** decimals);
+
+            const whole = amountBigInt / divisor;
+            const fraction = amountBigInt % divisor;
+
+            if (fraction === BigInt(0)) {
+                return whole.toString();
+            }
+
+            // Format fractional part with 4 decimal places
+            const fractionStr = fraction.toString()
+                .padStart(decimals, '0')
+                .substring(0, 4)
+                .replace(/0+$/, '');
+
+            return `${whole.toString()}.${fractionStr}`;
         } catch {
-            return amount;
+            return amount.slice(0, 8); // Fallback for large numbers
         }
     }, []);
 
@@ -201,42 +223,12 @@ export default function TradeExecutionsTab({
         [getTokenSymbol, formatAmount, getStatusProperties, toggleLogExpansion, expandedLogId]
     );
 
-    // Sorting logic
-    const [sortConfig, setSortConfig] = useState<{
-        key: keyof TradeExecutionLog;
-        direction: 'asc' | 'desc'
-    }>({
-        key: 'createdAt',
-        direction: 'desc'
-    });
-
+    // Simplified sorting
     const sortedLogs = useMemo(() => {
-        return [...logs].sort((a, b) => {
-            const aValue = a[sortConfig.key] || '';
-            const bValue = b[sortConfig.key] || '';
-
-            if (sortConfig.key === 'createdAt') {
-                const dateA = new Date(aValue).getTime();
-                const dateB = new Date(bValue).getTime();
-                return sortConfig.direction === 'asc' ? dateA - dateB : dateB - dateA;
-            }
-
-            if (typeof aValue === 'number' && typeof bValue === 'number') {
-                return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
-            }
-
-            return sortConfig.direction === 'asc'
-                ? String(aValue).localeCompare(String(bValue))
-                : String(bValue).localeCompare(String(aValue));
-        });
-    }, [logs, sortConfig]);
-
-    const requestSort = useCallback((key: keyof TradeExecutionLog) => {
-        setSortConfig(prev => ({
-            key,
-            direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
-        }));
-    }, []);
+        return [...logs].sort((a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+    }, [logs]);
 
     // Connection status indicator
     const renderConnectionStatus = () => {
@@ -354,7 +346,7 @@ export default function TradeExecutionsTab({
                                             <div className="flex justify-between">
                                                 <span className="text-gray-400">Amount In:</span>
                                                 <span className="text-gray-300">
-                                                    {formatAmount(log.amount, log.tokenInDecimals)}
+                                                    {formatAmount(log.amountIn, log.tokenInDecimals)}
                                                 </span>
                                             </div>
                                             <div className="flex justify-between">
@@ -369,6 +361,12 @@ export default function TradeExecutionsTab({
                                                 <span className="text-gray-300">
                                                     {log.minAmountOut ?
                                                         formatAmount(log.minAmountOut, log.tokenOutDecimals) : 'N/A'}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-400">Price Impact:</span>
+                                                <span className={log.priceImpact > 5 ? "text-red-300" : "text-gray-300"}>
+                                                    {log.priceImpact ? `${log.priceImpact.toFixed(2)}%` : 'N/A'}
                                                 </span>
                                             </div>
                                         </div>

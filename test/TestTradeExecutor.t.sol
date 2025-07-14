@@ -16,6 +16,8 @@ contract TestTradeExecutor is Test {
     Exchange public exchange;
     TradeExecutor public tradeExecutor;
 
+    uint256 public pairId = 1; // First pair will have ID 1
+
     address deployer = address(1);
     address trader = address(2);
 
@@ -24,6 +26,7 @@ contract TestTradeExecutor is Test {
     uint256 constant VOLATILE_TRADE_AMOUNT = 1 * 10 ** 18; // 1 token (18 decimals)
 
     function setUp() public {
+        // Set msg.sender to deployer for all deployments
         vm.startPrank(deployer);
 
         // Deploy tokens
@@ -31,15 +34,20 @@ contract TestTradeExecutor is Test {
         volatileToken = new MockVolatileToken();
 
         // Deploy mock price feeds
-        stableFeed = new MockAggregatorV3(1e8);
-        volatileFeed = new MockAggregatorV3(3000e8);
+        stableFeed = new MockAggregatorV3(1e8); // $1
+        volatileFeed = new MockAggregatorV3(3000e8); // $3000
 
         // Deploy Exchange
-        exchange =
-            new Exchange(address(stableToken), address(volatileToken), address(stableFeed), address(volatileFeed));
+        exchange = new Exchange();
 
-        // Deploy TradeExecutor
-        tradeExecutor = new TradeExecutor(address(stableToken), address(volatileToken), address(exchange));
+        // Add token pair to Exchange
+        exchange.addTokenPair(address(stableToken), address(volatileToken), address(stableFeed), address(volatileFeed));
+
+        // Deploy TradeExecutor with exchange address and pairId
+        tradeExecutor = new TradeExecutor(address(exchange), pairId);
+
+        // AUTHORIZE TradeExecutor as trader in Exchange
+        exchange.authorizeTrader(address(tradeExecutor));
 
         // Fund TradeExecutor
         stableToken.mint(address(tradeExecutor), 10_000 * 10 ** 6);
@@ -48,16 +56,16 @@ contract TestTradeExecutor is Test {
         // Add initial liquidity to exchange
         stableToken.mint(deployer, 100_000 * 10 ** 6);
         volatileToken.mint(deployer, 1_000 * 10 ** 18);
-        stableToken.approve(address(exchange), 100_000 * 10 ** 6);
-        volatileToken.approve(address(exchange), 1_000 * 10 ** 18);
-        exchange.addLiquidity(100_000 * 10 ** 6, 1_000 * 10 ** 18);
+        stableToken.approve(address(exchange), type(uint256).max);
+        volatileToken.approve(address(exchange), type(uint256).max);
+        exchange.addLiquidity(pairId, 100_000 * 10 ** 6, 1_000 * 10 ** 18);
 
         vm.stopPrank();
     }
 
     // Helper to calculate expected output
     function calculateExpectedOutput(bool buyVolatile, uint256 amountIn) public view returns (uint256) {
-        (uint256 stableReserve, uint256 volatileReserve) = exchange.getReserves();
+        (uint256 stableReserve, uint256 volatileReserve) = exchange.getReserves(pairId);
         if (buyVolatile) {
             return (amountIn * volatileReserve) / (stableReserve + amountIn);
         } else {
@@ -77,6 +85,7 @@ contract TestTradeExecutor is Test {
 
     // Test successful buy trade
     function testExecuteTradeBuy() public {
+        // Execute as deployer (owner)
         vm.startPrank(deployer);
         uint256 minAmountOut = calculateMinAmountOut(true, TRADE_AMOUNT, 100); // 1% slippage
 
@@ -100,6 +109,7 @@ contract TestTradeExecutor is Test {
 
     // Test successful sell trade
     function testExecuteTradeSell() public {
+        // Execute as deployer (owner)
         vm.startPrank(deployer);
         uint256 minAmountOut = calculateMinAmountOut(false, VOLATILE_TRADE_AMOUNT, 100); // 1% slippage
 
@@ -121,27 +131,14 @@ contract TestTradeExecutor is Test {
         vm.stopPrank();
     }
 
-    // Test token withdrawal functionality
-    function testWithdrawTokens() public {
-        vm.startPrank(deployer);
-        uint256 initialBalance = stableToken.balanceOf(deployer);
-        uint256 withdrawAmount = 5_000 * 10 ** 6;
-
-        tradeExecutor.withdrawTokens(address(stableToken), withdrawAmount);
-        vm.stopPrank();
-
-        assertEq(stableToken.balanceOf(deployer), initialBalance + withdrawAmount, "Deployer balance mismatch");
-        assertEq(stableToken.balanceOf(address(tradeExecutor)), 5_000 * 10 ** 6, "TradeExecutor balance mismatch");
-    }
-
     // Test trade with insufficient balance
     function testExecuteTradeInsufficientBalance() public {
         vm.startPrank(deployer);
         uint256 minAmountOut = calculateMinAmountOut(true, TRADE_AMOUNT, 100);
-
-        // Try to trade more than balance
         uint256 excessiveAmount = stableToken.balanceOf(address(tradeExecutor)) + 1;
-        vm.expectRevert("Insufficient balance");
+
+        // Change to expect custom error
+        vm.expectRevert(TradeExecutor.TradeExecutor__InsufficientBalance.selector);
         tradeExecutor.executeTrade(true, excessiveAmount, minAmountOut);
         vm.stopPrank();
     }
@@ -150,9 +147,10 @@ contract TestTradeExecutor is Test {
     function testExecuteTradeInsufficientOutput() public {
         vm.startPrank(deployer);
         uint256 expectedOut = calculateExpectedOutput(true, TRADE_AMOUNT);
-        uint256 minAmountOut = expectedOut + 1; // Set min output higher than expected
+        uint256 minAmountOut = expectedOut + 1;
 
-        vm.expectRevert("Insufficient output amount");
+        // Change to expect custom error
+        vm.expectRevert(TradeExecutor.TradeExecutor__InsufficientBalance.selector);
         tradeExecutor.executeTrade(true, TRADE_AMOUNT, minAmountOut);
         vm.stopPrank();
     }
@@ -161,16 +159,37 @@ contract TestTradeExecutor is Test {
     function testNonOwnerCannotExecuteTrade() public {
         vm.startPrank(trader);
         uint256 minAmountOut = calculateMinAmountOut(true, TRADE_AMOUNT, 100);
-        vm.expectRevert("Unauthorized");
+
+        // Change to expect custom error
+        vm.expectRevert(TradeExecutor.TradeExecutor__UnauthorizedOwner.selector);
         tradeExecutor.executeTrade(true, TRADE_AMOUNT, minAmountOut);
         vm.stopPrank();
     }
 
-    // Test non-owner cannot withdraw
-    function testNonOwnerCannotWithdraw() public {
-        vm.startPrank(trader);
-        vm.expectRevert("Unauthorized");
-        tradeExecutor.withdrawTokens(address(stableToken), 100);
+    // Test position opening with entry price
+    function testPositionOpening() public {
+        vm.startPrank(deployer);
+        uint256 minAmountOut = calculateMinAmountOut(true, TRADE_AMOUNT, 100);
+
+        // Record logs to capture the actual position ID
+        vm.recordLogs();
+        tradeExecutor.executeTrade(true, TRADE_AMOUNT, minAmountOut);
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+
+        // Find the PositionOpened event
+        bytes32 positionId;
+        for (uint256 i = 0; i < entries.length; i++) {
+            if (entries[i].topics[0] == keccak256("PositionOpened(bytes32,address,bool,uint256,uint256)")) {
+                positionId = entries[i].topics[1];
+                break;
+            }
+        }
+
+        require(positionId != bytes32(0), "Position ID not found");
+
+        // Verify entry price is non-zero
+        uint256 actualEntryPrice = tradeExecutor.getEntryPrice(positionId);
+        assertGt(actualEntryPrice, 0, "Entry price should be non-zero");
         vm.stopPrank();
     }
 }

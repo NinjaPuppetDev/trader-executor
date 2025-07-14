@@ -8,64 +8,89 @@ import {MockAggregatorV3} from "../test/mocks/MockAggregatorV3.sol";
 import {Exchange} from "../src/Exchange.sol";
 import {PriceTrigger} from "../src/PriceTrigger.sol";
 import {TradeExecutor} from "../src/TradeExecutor.sol";
+import {RiskManager} from "../src/RiskManager.sol";
 
-contract DeployOrchestratorExecutor is Script {
-    // Share these constants with PriceTrigger deployment
-    int256 public constant VOLATILE_INITIAL_PRICE = 2200e8; // $2,200
-    uint256 public constant SPIKE_THRESHOLD = 100; // 1%
-    uint256 public constant COOLDOWN_PERIOD = 300; // 5 minutes
-    uint256 public constant MAX_DATA_AGE = 3600; // 1 hour
+contract DeployFullSystem is Script {
+    // Constants (unchanged)
+    int256 public constant VOLATILE_INITIAL_PRICE = 3000e8;
+    int256 public constant STABLE_INITIAL_PRICE = 1e8;
+    uint256 public constant SPIKE_THRESHOLD = 10;
+    uint256 public constant COOLDOWN_PERIOD = 300;
+    uint256 public constant MAX_DATA_AGE = 900;
+    uint256 public constant INITIAL_STABLE_LIQUIDITY = 220_000 * 10 ** 6;
+    uint256 public constant INITIAL_VOLATILE_LIQUIDITY = 100 * 10 ** 18;
+    uint256 public constant PAIR_ID = 1;
 
     function run() external {
         vm.startBroadcast();
 
-        // Deploy tokens
+        // 1. Deploy tokens and price feeds
         MockStablecoin stableToken = new MockStablecoin();
         MockVolatileToken volatileToken = new MockVolatileToken();
+        MockAggregatorV3 stableFeed = new MockAggregatorV3(STABLE_INITIAL_PRICE);
+        MockAggregatorV3 volatileFeed = new MockAggregatorV3(VOLATILE_INITIAL_PRICE);
 
-        // Deploy mock price feeds
-        MockAggregatorV3 stableFeed = new MockAggregatorV3(1e8); // $1.00
-        MockAggregatorV3 volatileFeed = new MockAggregatorV3(VOLATILE_INITIAL_PRICE); // $2,200
+        // 2. Deploy Exchange
+        Exchange exchange = new Exchange();
 
-        // Deploy Exchange with shared feeds
-        Exchange exchange =
-            new Exchange(address(stableToken), address(volatileToken), address(stableFeed), address(volatileFeed));
+        // 3. Add token pair to Exchange
+        exchange.addTokenPair(address(stableToken), address(volatileToken), address(stableFeed), address(volatileFeed));
 
-        // Initialize Exchange prices
-        exchange.updateStablePrice(1e8);
-        exchange.updateVolatilePrice(VOLATILE_INITIAL_PRICE);
+        // 4. Deploy TradeExecutor
+        TradeExecutor tradeExecutor = new TradeExecutor(address(exchange), PAIR_ID);
 
-        // Deploy TradeExecutor (VRF removed)
-        TradeExecutor tradeExecutor = new TradeExecutor(address(stableToken), address(volatileToken), address(exchange));
-
-        // Deploy PriceTrigger
+        // 5. Deploy other components
         PriceTrigger priceTrigger =
-            new PriceTrigger(address(volatileFeed), SPIKE_THRESHOLD, COOLDOWN_PERIOD, MAX_DATA_AGE);
+            new PriceTrigger(address(volatileFeed), SPIKE_THRESHOLD, COOLDOWN_PERIOD, MAX_DATA_AGE, PAIR_ID);
 
-        // Fund TradeExecutor with 10,000 USDC
-        stableToken.mint(address(tradeExecutor), 10_000 * 10 ** 6);
+        // In DeployFullSystem.sol
+        RiskManager riskManager = new RiskManager(
+            address(exchange),
+            address(volatileFeed),
+            msg.sender, // Owner = deployer
+            address(tradeExecutor),
+            PAIR_ID // Add pair ID
+        );
 
-        // Mint sufficient tokens to deployer
-        stableToken.mint(msg.sender, 220_000 * 10 ** 6);
-        volatileToken.mint(msg.sender, 1_000 * 10 ** 18);
+        // 6. Authorize components
+        exchange.authorizeTrader(address(tradeExecutor));
+        exchange.authorizeRiskManager(address(riskManager));
+
+        // 7. Prepare liquidity
+        stableToken.mint(msg.sender, INITIAL_STABLE_LIQUIDITY * 10);
+        volatileToken.mint(msg.sender, INITIAL_VOLATILE_LIQUIDITY * 10);
+
+        stableToken.approve(address(exchange), type(uint256).max);
+        volatileToken.approve(address(exchange), type(uint256).max);
+
+        // 8. Add liquidity
+        exchange.addLiquidity(PAIR_ID, INITIAL_STABLE_LIQUIDITY, INITIAL_VOLATILE_LIQUIDITY);
 
         vm.stopBroadcast();
 
-        // Perform approvals and liquidity addition in separate tx
-        vm.startBroadcast();
-        stableToken.approve(address(exchange), 220_000 * 10 ** 6);
-        volatileToken.approve(address(exchange), 1_000 * 10 ** 18);
-        exchange.addLiquidity(220_000e6, 100e18); // 220,000 USDC and 100 volatile tokens
-        vm.stopBroadcast();
+        // Logging - UPDATED TOKEN ADDRESS ACCESS
+        console.log("========= SYSTEM DEPLOYMENT =========");
+        console.log("Deployer:        ", msg.sender);
+        console.log("StableToken:     ", address(stableToken));
+        console.log("VolatileToken:   ", address(volatileToken));
+        console.log("StableFeed:      ", address(stableFeed));
+        console.log("VolatileFeed:    ", address(volatileFeed));
+        console.log("Exchange:        ", address(exchange));
+        console.log("TradeExecutor:   ", address(tradeExecutor));
+        console.log("PriceTrigger:    ", address(priceTrigger));
+        console.log("RiskManager:     ", address(riskManager));
+        console.log("====================================");
+        console.log(
+            "Exchange Reserves for Pair %s: %s stable, %s volatile",
+            PAIR_ID,
+            INITIAL_STABLE_LIQUIDITY,
+            INITIAL_VOLATILE_LIQUIDITY
+        );
 
-        // Log addresses
-        console.log("Deployer Address: ", msg.sender);
-        console.log("MockStablecoin: ", address(stableToken));
-        console.log("MockVolatileToken: ", address(volatileToken));
-        console.log("StableFeed: ", address(stableFeed));
-        console.log("VolatileFeed: ", address(volatileFeed));
-        console.log("Exchange: ", address(exchange));
-        console.log("TradeExecutor: ", address(tradeExecutor));
-        console.log("PriceTrigger: ", address(priceTrigger));
+        // FIXED: Access token addresses directly
+        address actualStable = address(tradeExecutor.stableToken());
+        address actualVolatile = address(tradeExecutor.volatileToken());
+        console.log("TradeExecutor StableToken:  ", actualStable);
+        console.log("TradeExecutor VolatileToken:", actualVolatile);
     }
 }

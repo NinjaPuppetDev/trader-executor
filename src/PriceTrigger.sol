@@ -9,18 +9,26 @@ contract PriceTrigger is AutomationCompatibleInterface {
     AggregatorV3Interface public immutable priceFeed;
     uint256 public immutable i_spikeThreshold;
     uint256 public immutable i_cooldownPeriod;
-    uint256 public immutable i_maxDataAge; // Maximum allowed data age (seconds)
+    uint256 public immutable i_maxDataAge;
+    uint256 public immutable i_pairId;
 
     uint256 public lastTriggerTime;
     int256 public lastPrice;
 
     event PriceSpikeDetected(int256 currentPrice, int256 previousPrice, uint256 changePercent);
 
-    constructor(address _priceFeed, uint256 _spikeThreshold, uint256 _cooldownPeriod, uint256 _maxDataAge) {
+    constructor(
+        address _priceFeed,
+        uint256 _spikeThreshold,
+        uint256 _cooldownPeriod,
+        uint256 _maxDataAge,
+        uint256 _pairId
+    ) {
         priceFeed = AggregatorV3Interface(_priceFeed);
         i_spikeThreshold = _spikeThreshold;
         i_cooldownPeriod = _cooldownPeriod;
         i_maxDataAge = _maxDataAge;
+        i_pairId = _pairId;
 
         // Initialize with freshness checks
         (uint80 roundId, int256 initialPrice,, uint256 updatedAt, uint80 answeredInRound) = priceFeed.latestRoundData();
@@ -92,5 +100,9 @@ contract PriceTrigger is AutomationCompatibleInterface {
         uint256 absPrevious = previous < 0 ? uint256(-previous) : uint256(previous);
 
         return (absChange * 10000) / absPrevious; // Basis points
+    }
+
+    function getPairId() public view returns (uint256) {
+        return i_pairId;
     }
 }

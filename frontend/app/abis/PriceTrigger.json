@@ -21,6 +21,11 @@
                 "name": "_maxDataAge",
                 "type": "uint256",
                 "internalType": "uint256"
+            },
+            {
+                "name": "_pairId",
+                "type": "uint256",
+                "internalType": "uint256"
             }
         ],
         "stateMutability": "nonpayable"
@@ -75,6 +80,19 @@
     },
     {
         "type": "function",
+        "name": "getPairId",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
         "name": "i_cooldownPeriod",
         "inputs": [],
         "outputs": [
@@ -89,6 +107,19 @@
     {
         "type": "function",
         "name": "i_maxDataAge",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "i_pairId",
         "inputs": [],
         "outputs": [
             {

@@ -1,17 +1,12 @@
-import { getFearAndGreedIndex } from '../utils/fgiService';
-import { getOnBalanceVolume } from '../utils/obvService';
-import fs from 'fs';
-import path from 'path';
+import { MarketDataCollector } from '../utils/marketDataCollector';
+import { BayesianPriceAnalyzer } from '../utils/BayesianPriceAnalyzer'; // New Bayesian analyzer
 import { ethers } from 'ethers';
+import { MarketDataState } from '../types';
+import { BayesianRegressionResult } from '../types';
 
-const TOKEN_A = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
-const TOKEN_B = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
-const RL_LOG_PATH = path.resolve(__dirname, '../logs/rl-trainer-log.json');
+const ZERO_ADDRESS = ethers.constants.AddressZero;
 
-const TOKEN_A_CHECKSUM = ethers.utils.getAddress(TOKEN_A);
-const TOKEN_B_CHECKSUM = ethers.utils.getAddress(TOKEN_B);
-
-interface PromptConfig {
+export interface PromptConfig {
     system: string;
     instructions: string;
     token_mapping: Record<string, string>;
@@ -25,194 +20,330 @@ interface TradingDecision {
     amount: string;
     slippage: number;
     reasoning: string;
-    confidence?: 'high' | 'medium' | 'low';
+    confidence: 'high' | 'medium' | 'low';
+    stopLoss?: number;
+    takeProfit?: number;
 }
 
-function loadRLTrainerLogs(): any[] {
-    try {
-        if (fs.existsSync(RL_LOG_PATH)) {
-            return JSON.parse(fs.readFileSync(RL_LOG_PATH, 'utf-8'));
-        }
-        return [];
-    } catch (error) {
-        console.error('Error loading RL logs:', error);
-        return [];
+
+
+export class PromptService {
+    private marketDataCollector: MarketDataCollector;
+    private stableToken: string;
+    private volatileToken: string;
+    private symbol: string;
+
+    constructor(
+        marketDataCollector: MarketDataCollector,
+        stableToken: string,
+        volatileToken: string,
+        symbol: string = 'ethusdt'
+    ) {
+        this.marketDataCollector = marketDataCollector;
+        this.stableToken = stableToken;
+        this.volatileToken = volatileToken;
+        this.symbol = symbol;
     }
-}
 
-function formatStrategyInsights(logs: any[]): string {
-    if (!logs.length) return "No recent strategy adjustments";
+    private getMarketStateWithFallback(): MarketDataState {
+        const state = this.marketDataCollector.getCurrentMarketState();
 
-    return logs.slice(-3).map(log => {
-        return `[${new Date(log.timestamp).toLocaleTimeString()}] ${log.strategyFocus} strategy:
-- ${log.insight}
-- Actions: ${log.actions.join(', ')}`;
-    }).join('\n\n');
-}
+        if (!state) {
+            return {
+                prices: [],
+                volumes: [],
+                currentPrice: 0,
+                averageVolume: 0,
+                timestamp: Date.now(),
+                symbol: this.symbol,
+                additional: {
+                    high: 0,
+                    low: 0
+                }
+            };
+        }
 
-export async function generatePromptConfig(): Promise<PromptConfig> {
-    const [fgiResult, obvResult] = await Promise.allSettled([
-        getFearAndGreedIndex(),
-        getOnBalanceVolume('ETH')
-    ]);
+        return state;
+    }
 
-    const fgiData = fgiResult.status === 'fulfilled' ? fgiResult.value :
-        { value: 50, classification: 'Neutral' };
+    async generatePromptConfig(currentPrice?: number): Promise<{
+        config: PromptConfig;
+        bayesianAnalysis: BayesianRegressionResult
+    }> {
+        const marketState = this.getMarketStateWithFallback();
+        const bayesianAnalysis = BayesianPriceAnalyzer.analyze(marketState);
+        const stdDev = Math.sqrt(bayesianAnalysis.variance);
+        const priceDeviation = (marketState.currentPrice - bayesianAnalysis.predictedPrice) / stdDev;
+        const absDeviation = Math.abs(priceDeviation);
+        const volatility = bayesianAnalysis.volatility;
 
-    const obvData = obvResult.status === 'fulfilled' ? obvResult.value :
-        {
-            value: 0,
-            trend: 'neutral',
-            currentPrice: 0,
-            priceChange24h: 0,
-            priceChangePercent: 0
+        if (currentPrice !== undefined) {
+            marketState.currentPrice = currentPrice;
+        }
+
+
+        // Pre-calculate critical values
+        const positionSize = this.calculatePositionSize(absDeviation);
+        const slippage = this.calculateSlippage(volatility);
+        const confidence = this.calculateConfidence(absDeviation);
+        const tradeSignal = this.getTradeSignal(
+            priceDeviation,
+            bayesianAnalysis.trendDirection
+        );
+
+        // Format Bayesian analysis for display
+        const analysisTable = `
+┌──────────────────────┬──────────────────────┐
+│ Current Price        │ ${marketState.currentPrice.toFixed(2)} 
+│ Predicted Price      │ ${bayesianAnalysis.predictedPrice.toFixed(2)} 
+│ Deviation            │ ${priceDeviation.toFixed(2)}σ
+│ Confidence Interval  │ [${bayesianAnalysis.confidenceInterval[0].toFixed(2)}, ${bayesianAnalysis.confidenceInterval[1].toFixed(2)}]
+│ Volatility           │ ${volatility.toFixed(4)}
+│ Trend Direction      │ ${bayesianAnalysis.trendDirection.toUpperCase()}
+└──────────────────────┴──────────────────────┘`.trim();
+
+        return {
+            config: {
+                system: `ROLE: Senior Quantitative Analyst
+TASK: Execute Bayesian price action strategy for ${this.symbol.toUpperCase()}
+
+## STATISTICAL ANALYSIS ##
+${analysisTable}
+
+## TRADING RULES (STRICT ENFORCEMENT) ##
+1. Trade signals:
+   - BUY ONLY when: deviation < -1σ AND trend is BULLISH
+   - SELL ONLY when: deviation > 1σ AND trend is BEARISH
+   - HOLD otherwise
+
+2. Position sizing (ETH equivalent):
+   - |dev| > 2σ: ${positionSize.high} ETH
+   - 1σ < |dev| ≤ 2σ: ${positionSize.medium} ETH
+   - |dev| ≤ 1σ: HOLD (0 ETH)
+
+3. Risk parameters (NON-NEGOTIABLE):
+   Stop Loss: ${bayesianAnalysis.stopLoss.toFixed(2)}
+   Take Profit: ${bayesianAnalysis.takeProfit.toFixed(2)}
+   Slippage: ${slippage}%
+
+4. Directional rules:
+   - For BUY: 
+        • SL must be BELOW current price
+        • TP must be ABOVE current price
+   - For SELL:
+        • SL must be ABOVE current price
+        • TP must be BELOW current price
+
+5. Output requirements:
+   ${this.getOutputTemplate(positionSize, slippage, bayesianAnalysis)}
+
+## CRITICAL WARNINGS ##
+1. NEVER change stopLoss/takeProfit values
+2. For hold decisions, USE EXACTLY:
+   {
+     "decision": "hold",
+     "tokenIn": "${ZERO_ADDRESS}",
+     "tokenOut": "${ZERO_ADDRESS}",
+     "amount": "0",
+     "slippage": 0,
+     "stopLoss": 0,
+     "takeProfit": 0
+   }
+     
+   
+3. Token addresses MUST be:
+   - Stablecoin: ${this.stableToken}
+   - Volatile: ${this.volatileToken}
+4. Reasoning MUST include σ deviation`.trim(),
+
+                instructions: `Current Market: ${this.symbol.toUpperCase()} 
+Price: ${marketState.currentPrice} (Dev: ${priceDeviation.toFixed(2)}σ)
+Signal: ${tradeSignal}
+
+Output ONLY valid JSON with pre-calculated values`.trim(),
+
+                token_mapping: {
+                    "STABLECOIN": this.stableToken,
+                    "VOLATILE": this.volatileToken
+                },
+
+                market_context: {
+                    current_price: marketState.currentPrice,
+                    predicted_price: bayesianAnalysis.predictedPrice,
+                    deviation_sigma: priceDeviation,
+                    confidence_interval: bayesianAnalysis.confidenceInterval,
+                    trend: bayesianAnalysis.trendDirection,
+                    volatility: volatility,
+                    stop_loss: bayesianAnalysis.stopLoss,
+                    take_profit: bayesianAnalysis.takeProfit,
+                    recommended_position_size: positionSize,
+                    recommended_slippage: slippage,
+                    timestamp: new Date().toISOString()
+                }
+            },
+            bayesianAnalysis
         };
-
-    const rlLogs = loadRLTrainerLogs();
-    const strategyInsights = formatStrategyInsights(rlLogs);
-
-    const priceDirection = obvData.priceChange24h >= 0 ? '↑' : '↓';
-    const priceChangeDisplay = obvData && typeof obvData.priceChange24h === 'number' && typeof obvData.priceChangePercent === 'number'
-        ? `${priceDirection}${Math.abs(obvData.priceChange24h).toFixed(2)} (${Math.abs(obvData.priceChangePercent).toFixed(2)}%)`
-        : 'N/A';
-
-    const marketContext = `
-## MARKET CONTEXT ##
-Current Price: $${obvData.currentPrice.toFixed(2)}
-24h Change: ${priceChangeDisplay}
-Fear & Greed Index: ${fgiData.value} (${fgiData.classification})
-On-Balance Volume: ${obvData.value.toLocaleString('en-US', {
-        maximumFractionDigits: 0
-    })} (${obvData.trend.toUpperCase()})
-${getMarketSentiment(fgiData.value, obvData.trend, obvData.priceChangePercent)}
-`.trim();
-
-    const decisionFramework = `
-## DECISION FRAMEWORK ##
-Consider these factors holistically:
-1. PRICE ACTION & VOLUME:
-   - Current: $${obvData.currentPrice.toFixed(2)} (${priceChangeDisplay})
-   - OBV: ${obvData.trend === 'bullish' ? '↑ Accumulation' : obvData.trend === 'bearish' ? '↓ Distribution' : '→ Neutral'}
-
-2. MARKET SENTIMENT (FGI): 
-   - <30 Extreme Fear: Potential buying opportunities
-   - 30-45 Fear: Cautious accumulation
-   - 45-55 Neutral: Technical-driven decisions
-   - 55-70 Greed: Consider profit-taking
-   - >70 Extreme Greed: Potential selling opportunities
-
-3. VOLUME-PRICE CONFIRMATION:
-   - Bullish + Rising OBV = Strong confirmation
-   - Bullish + Falling OBV = Warning sign
-   - Bearish + Falling OBV = Strong confirmation
-   - Bearish + Rising OBV = Potential reversal
-
-4. RECENT PERFORMANCE:
-${strategyInsights || "   - No recent performance data available"}
-
-5. RISK MANAGEMENT:
-   - Avoid trading during high volatility (>5% 24h moves)
-   - Require 2:1 reward/risk ratio minimum
-   - Position size based on confidence level
-`.trim();
-
-    const positionGuide = `
-## POSITION GUIDE ##
-┌───────────────────┬───────────────────────┐
-│ Confidence Level  │ ETH Amount            │
-├───────────────────┼───────────────────────┤
-│ High Confidence   │ 0.025 - 0.04          │
-│ Medium Confidence │ 0.01 - 0.025          │
-│ Low Confidence    │ 0 - 0.01 (or HOLD)    │
-└───────────────────┴───────────────────────┘
-* Only trade when technicals and fundamentals align
-* High volatility (>5% moves): Reduce position size by 50%
-`.trim();
-
-    // ENHANCED: Added explicit output formatting instructions
-    return {
-
-        // In generatePromptConfig()
-        system: `ROLE: Senior Cryptocurrency Analyst
-// ... existing content ...
-CRITICAL OUTPUT REQUIREMENTS:
-1. After <think> analysis, output ONLY valid JSON
-2. JSON must:
-   - Use double quotes for all properties and string values
-   - Contain these exact properties:
-        "decision", "tokenIn", "tokenOut", "amount", 
-        "slippage", "reasoning", "confidence"
-3. Example valid output:
-<think>
-Market shows bullish indicators with rising OBV...
-Recommend buying with medium confidence.
-</think>
-{
-  "decision": "buy",
-  "tokenIn": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-  "tokenOut": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
-  "amount": "0.025",
-  "slippage": 1.0,
-  "reasoning": "Bullish indicators with volume confirmation",
-  "confidence": "medium"
-}
-`.trim(),
-
-        instructions: `Generate trading recommendation as JSON with these fields:
-{
-  "reasoning": "Brief analysis (max 25 words) including confidence level",
-  "decision": "buy|sell|hold",
-  "tokenIn": "Token address or 0x0 for hold",
-  "tokenOut": "Token address or 0x0 for hold",
-  "amount": "Trade amount in ETH (0 for hold)",
-  "slippage": 1-3,
-  "confidence": "high|medium|low"
-}`,
-
-        token_mapping: {
-            "STABLECOIN": TOKEN_A_CHECKSUM,
-            "VOLATILE": TOKEN_B_CHECKSUM
-        },
-
-        market_context: {
-            current_price: obvData.currentPrice,
-            price_change_24h: obvData.priceChange24h,
-            price_change_percent: obvData.priceChangePercent,
-            fgi: fgiData.value,
-            fgi_classification: fgiData.classification,
-            obv_value: obvData.value,
-            obv_trend: obvData.trend,
-            rl_insights: rlLogs.slice(-3),
-            timestamp: new Date().toISOString()
-        }
-    };
-}
-
-function getMarketSentiment(
-    fgi: number,
-    obvTrend: string,
-    priceChangePercent: number
-): string {
-    const sentiment = fgi < 30 ? "EXTREME FEAR - Potential buying opportunity" :
-        fgi < 45 ? "FEAR - Market undervalued" :
-            fgi < 55 ? "NEUTRAL - Balanced market" :
-                fgi < 70 ? "GREED - Overvaluation concerns" :
-                    "EXTREME GREED - Bubble risk";
-
-    const volumeContext = obvTrend === 'bullish' ? " with volume accumulation" :
-        obvTrend === 'bearish' ? " with volume distribution" :
-            " with neutral volume flow";
-
-    let priceSentiment = "";
-    if (Math.abs(priceChangePercent) > 5) {
-        priceSentiment = priceChangePercent > 0
-            ? " STRONG UPTREND"
-            : " STRONG DOWNTREND";
-    } else if (Math.abs(priceChangePercent) > 2) {
-        priceSentiment = priceChangePercent > 0
-            ? " MODERATE UPTREND"
-            : " MODERATE DOWNTREND";
     }
 
-    return `Market Sentiment: ${sentiment}${volumeContext}${priceSentiment}`;
+    // ======= HELPER METHODS =======
+
+    private calculatePositionSize(absDeviation: number) {
+        return {
+            high: absDeviation > 2 ? 0.04 : 0,
+            medium: absDeviation > 1 && absDeviation <= 2 ? 0.03 : 0
+        };
+    }
+
+    private calculateSlippage(volatility: number) {
+        return volatility > 0.03 ? 2.0 : 1.0;
+    }
+
+    private calculateConfidence(absDeviation: number): 'high' | 'medium' | 'low' {
+        return absDeviation > 2 ? 'high' :
+            absDeviation > 1 ? 'medium' : 'low';
+    }
+
+    private getTradeSignal(
+        deviation: number,
+        trend: 'bullish' | 'bearish' | 'neutral'
+    ): string {
+        if (deviation < -1 && trend === 'bullish') return 'STRONG BUY SIGNAL';
+        if (deviation > 1 && trend === 'bearish') return 'STRONG SELL SIGNAL';
+        if (Math.abs(deviation) > 1) return 'NO TRADE: Trend misalignment';
+        return 'NO TRADE: Within 1σ confidence';
+    }
+
+    private getOutputTemplate(
+        positionSize: { high: number; medium: number },
+        slippage: number,
+        bayesianAnalysis: BayesianRegressionResult
+    ) {
+        return `Generate JSON with EXACTLY these values:
+{
+  "decision": "{{buy/sell/hold}}",
+  "tokenIn": "{{${this.stableToken}|${this.volatileToken}|${ZERO_ADDRESS}}}",
+  "tokenOut": "{{${this.stableToken}|${this.volatileToken}|${ZERO_ADDRESS}}}",
+  "amount": "${positionSize.high || positionSize.medium || '0'}",
+  "slippage": ${slippage},
+  "stopLoss": ${bayesianAnalysis.stopLoss.toFixed(2)},
+  "takeProfit": ${bayesianAnalysis.takeProfit.toFixed(2)},
+  "reasoning": "Max 20 words with σ reference",
+  "confidence": "${this.calculateConfidence(Math.abs(positionSize.high ? 2.1 : positionSize.medium ? 1.5 : 0))}"
+}`.trim();
+    }
+
+    private getVolatilityLevel(volatility: number): string {
+        if (volatility < 0.01) return "low";
+        if (volatility < 0.03) return "medium";
+        if (volatility < 0.06) return "high";
+        return "extreme";
+    }
+
+
+    enhancePromptWithSpike(
+        basePrompt: any,
+        currentPrice: number,
+        previousPrice: number,
+        changePercent: number
+    ): any {
+        const direction = currentPrice > previousPrice ? "up" : "down";
+        const volatilityLevel = this.getVolatilityLevel(Math.abs(changePercent) / 100);
+        const priceChange = Math.abs(changePercent);
+
+        return {
+            ...basePrompt,
+            market_context: {
+                ...(basePrompt.market_context || {}),
+                price_event: {
+                    type: "spike",
+                    direction,
+                    change_percent: priceChange,
+                    current_price: currentPrice,
+                    previous_price: previousPrice,
+                    volatility_level: volatilityLevel
+                }
+            },
+            instructions: `${basePrompt.instructions}\n\nIMPORTANT: Price spike detected (${priceChange.toFixed(2)}% ${direction})`
+        };
+    }
+
+    validateDecision(
+        decision: TradingDecision,
+        bayesianAnalysis: BayesianRegressionResult,
+        currentPrice: number
+    ): boolean {
+        // Always validate hold decisions first
+        if (decision.decision === 'hold') {
+            const isValidHold =
+                decision.tokenIn === ZERO_ADDRESS &&
+                decision.tokenOut === ZERO_ADDRESS &&
+                decision.amount === "0" &&
+                decision.slippage === 0;
+
+            if (!isValidHold) {
+                console.error("❌ Invalid hold decision format");
+                return false;
+            }
+            return true;
+        }
+
+        // Validate token addresses for trades
+        const validBuy = decision.tokenIn === this.stableToken &&
+            decision.tokenOut === this.volatileToken;
+        const validSell = decision.tokenIn === this.volatileToken &&
+            decision.tokenOut === this.stableToken;
+
+        if (!(validBuy || validSell)) {
+            console.error("❌ Invalid token pair");
+            return false;
+        }
+
+        // Validate risk parameters
+        if (decision.stopLoss === undefined || decision.takeProfit === undefined) {
+            console.error("❌ Missing risk parameters");
+            return false;
+        }
+
+        const slDiff = Math.abs(decision.stopLoss - bayesianAnalysis.stopLoss);
+        const tpDiff = Math.abs(decision.takeProfit - bayesianAnalysis.takeProfit);
+
+        if (slDiff > currentPrice * 0.01 || tpDiff > currentPrice * 0.01) {
+            console.error(`❌ Risk parameters differ from Bayesian values: 
+            SL: ${decision.stopLoss} vs ${bayesianAnalysis.stopLoss}
+            TP: ${decision.takeProfit} vs ${bayesianAnalysis.takeProfit}`);
+            return false;
+        }
+
+        // Validate position sizing
+        const stdDev = Math.sqrt(bayesianAnalysis.variance);
+        const priceDeviation = Math.abs((currentPrice - bayesianAnalysis.predictedPrice) / stdDev);
+        const amount = parseFloat(decision.amount);
+
+        let expectedAmount = 0;
+        if (priceDeviation > 2) expectedAmount = 0.04;
+        else if (priceDeviation > 1) expectedAmount = 0.03;
+
+        if (Math.abs(amount - expectedAmount) > 0.005) {
+            console.error(`❌ Invalid position size: ${amount} vs expected ${expectedAmount}`);
+            return false;
+        }
+
+        // Validate confidence level
+        if (priceDeviation > 1.5 && decision.confidence !== 'high') {
+            console.error(`❌ Confidence should be high for ${priceDeviation.toFixed(1)}σ deviation`);
+            return false;
+        }
+
+        // Validate slippage range
+        const validSlippage = bayesianAnalysis.volatility > 0.03
+            ? decision.slippage >= 1.5 && decision.slippage <= 3
+            : decision.slippage >= 0.5 && decision.slippage <= 1.5;
+
+        if (!validSlippage) {
+            console.error(`❌ Invalid slippage: ${decision.slippage} for volatility ${bayesianAnalysis.volatility}`);
+            return false;
+        }
+
+        return true;
+    }
 }

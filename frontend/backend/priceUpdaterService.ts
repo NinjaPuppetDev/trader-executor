@@ -3,9 +3,7 @@ import { getOnBalanceVolume } from './utils/obvService';
 import { CONFIG } from './config';
 import dotenv from 'dotenv';
 import PriceTriggerAbi from "../app/abis/PriceTrigger.json";
-import ExchangeAbi from "../app/abis/Exchange.json"; // Import the updated ABI
-
-
+import ExchangeAbi from "../app/abis/Exchange.json";
 
 dotenv.config();
 
@@ -83,23 +81,28 @@ async function updateContractPrice(
     }
 }
 
+// ======================
+// Fixed Exchange Price Update
+// ======================
 async function updateExchangePrices(
     exchange: ethers.Contract,
-    volatilePrice: number,
-    stablePrice: number
+    pairId: number
 ) {
     try {
-        const volatilePrice8 = ethers.utils.parseUnits(volatilePrice.toFixed(8), 8);
-        const stablePrice8 = ethers.utils.parseUnits(stablePrice.toFixed(8), 8);
+        console.log(`🔄 Updating Exchange prices for pair ${pairId}...`);
 
-        console.log("🔄 Updating Exchange prices...");
+        // Estimate gas with manual fallback
+        let gasEstimate;
+        try {
+            gasEstimate = await exchange.estimateGas.updatePrice(pairId);
+        } catch (e) {
+            console.warn("⚠️ Price update gas estimation failed, using fallback");
+            gasEstimate = ethers.BigNumber.from(300000); // Higher fallback
+        }
 
-        // Update volatile price
-        let tx = await exchange.updateVolatilePrice(volatilePrice8);
-        await tx.wait();
-
-        // Update stable price
-        tx = await exchange.updateStablePrice(stablePrice8);
+        const tx = await exchange.updatePrice(pairId, {
+            gasLimit: gasEstimate.mul(120).div(100) // 20% buffer
+        });
         await tx.wait();
 
         console.log("✅ Exchange prices updated");
@@ -131,9 +134,15 @@ async function updatePriceFeed() {
         // Create Exchange contract instance using the imported ABI
         const exchange = new ethers.Contract(
             CONFIG.exchangeAddress,
-            ExchangeAbi, // Use the imported ABI directly
+            ExchangeAbi,
             signer
         );
+
+        // Verify exchange contract
+        const code = await provider.getCode(CONFIG.exchangeAddress);
+        if (code === '0x') {
+            throw new Error(`Exchange contract not deployed at ${CONFIG.exchangeAddress}`);
+        }
 
         // Update volatile price feed
         if (CONFIG.volatileFeedAddress) {
@@ -159,8 +168,8 @@ async function updatePriceFeed() {
             console.log("⏭️ Stable feed address not set - skipping");
         }
 
-        // Update Exchange contract prices
-        await updateExchangePrices(exchange, currentPrice, 1.00);
+        // Update Exchange contract prices - now using single updatePrice call
+        await updateExchangePrices(exchange, CONFIG.pairId);
 
         // Trigger upkeep check after price update
         await triggerPriceUpkeep(signer);
@@ -178,11 +187,12 @@ async function main() {
 
     // Verify configuration
     const requiredConfig = [
-        'privateKeyKeeper', // PrivateKey#1 for testing purposes in production we dont need this script
+        'privateKeyKeeper',
         'rpcUrl',
         'volatileFeedAddress',
         'stableFeedAddress',
-        'exchangeAddress'
+        'exchangeAddress',
+        'pairId'  // Added pairId to required config
     ];
 
     let validConfig = true;
@@ -201,6 +211,7 @@ async function main() {
     console.log(`📡 Volatile Feed: ${CONFIG.volatileFeedAddress}`);
     console.log(`📡 Stable Feed: ${CONFIG.stableFeedAddress}`);
     console.log(`🔄 Exchange Address: ${CONFIG.exchangeAddress}`);
+    console.log(`🆔 Trading Pair ID: ${CONFIG.pairId}`);
 
     if (CONFIG.priceTriggerAddress) {
         console.log(`⚙️ Price Trigger Address: ${CONFIG.priceTriggerAddress}`);

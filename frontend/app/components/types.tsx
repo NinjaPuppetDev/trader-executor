@@ -64,6 +64,7 @@ export interface TradeExecutionLog extends BaseLogEntry {
     tokenOut: string;
     amount: string;
     gasUsed?: string;
+    priceImpact: GLfloat
 }
 
 export type LogEntry = PriceDetectionLogEntry | VeniceLogEntry | TradeExecutionLog;

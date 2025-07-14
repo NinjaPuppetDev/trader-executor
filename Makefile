@@ -20,7 +20,7 @@ deploy-venice-trigger:
 		--broadcast
 
 deploy-orchestrator:
-	forge script script/DeployOrchestratorExecutor.s.sol:DeployOrchestratorExecutor \
+	forge script script/DeployOrchestratorExecutor.s.sol:DeployFullSystem \
 		--rpc-url $(ANVIL_RPC) \
 		--private-key $(PRIVATE_KEY) \
 		--broadcast

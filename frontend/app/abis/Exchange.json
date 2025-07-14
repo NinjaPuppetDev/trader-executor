@@ -1,6 +1,61 @@
 [
     {
         "type": "constructor",
+        "inputs": [],
+        "stateMutability": "nonpayable"
+    },
+    {
+        "type": "function",
+        "name": "MAX_DATA_AGE",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "MAX_PAIRS",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "addLiquidity",
+        "inputs": [
+            {
+                "name": "pairId",
+                "type": "uint256",
+                "internalType": "uint256"
+            },
+            {
+                "name": "stableAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+            },
+            {
+                "name": "volatileAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+    },
+    {
+        "type": "function",
+        "name": "addTokenPair",
         "inputs": [
             {
                 "name": "_stableToken",
@@ -23,32 +78,79 @@
                 "internalType": "address"
             }
         ],
+        "outputs": [],
         "stateMutability": "nonpayable"
     },
     {
         "type": "function",
-        "name": "MAX_DATA_AGE",
-        "inputs": [],
+        "name": "authorizeRiskManager",
+        "inputs": [
+            {
+                "name": "riskManager",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+    },
+    {
+        "type": "function",
+        "name": "authorizeTrader",
+        "inputs": [
+            {
+                "name": "trader",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+    },
+    {
+        "type": "function",
+        "name": "authorizedRiskManagers",
+        "inputs": [
+            {
+                "name": "",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
         "outputs": [
             {
                 "name": "",
-                "type": "uint256",
-                "internalType": "uint256"
+                "type": "bool",
+                "internalType": "bool"
             }
         ],
         "stateMutability": "view"
     },
     {
         "type": "function",
-        "name": "addLiquidity",
+        "name": "authorizedTraders",
         "inputs": [
             {
-                "name": "stableAmount",
-                "type": "uint256",
-                "internalType": "uint256"
-            },
+                "name": "",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "outputs": [
             {
-                "name": "volatileAmount",
+                "name": "",
+                "type": "bool",
+                "internalType": "bool"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "deactivatePair",
+        "inputs": [
+            {
+                "name": "pairId",
                 "type": "uint256",
                 "internalType": "uint256"
             }
@@ -58,34 +160,14 @@
     },
     {
         "type": "function",
-        "name": "currentStablePrice",
-        "inputs": [],
-        "outputs": [
-            {
-                "name": "",
-                "type": "int256",
-                "internalType": "int256"
-            }
-        ],
-        "stateMutability": "view"
-    },
-    {
-        "type": "function",
-        "name": "currentVolatilePrice",
-        "inputs": [],
-        "outputs": [
-            {
-                "name": "",
-                "type": "int256",
-                "internalType": "int256"
-            }
-        ],
-        "stateMutability": "view"
-    },
-    {
-        "type": "function",
         "name": "getPortfolioValue",
-        "inputs": [],
+        "inputs": [
+            {
+                "name": "pairId",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
         "outputs": [
             {
                 "name": "",
@@ -98,7 +180,13 @@
     {
         "type": "function",
         "name": "getReserveBasedPrice",
-        "inputs": [],
+        "inputs": [
+            {
+                "name": "pairId",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
         "outputs": [
             {
                 "name": "",
@@ -111,15 +199,21 @@
     {
         "type": "function",
         "name": "getReserves",
-        "inputs": [],
+        "inputs": [
+            {
+                "name": "pairId",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
         "outputs": [
             {
-                "name": "stable",
+                "name": "",
                 "type": "uint256",
                 "internalType": "uint256"
             },
             {
-                "name": "volatile",
+                "name": "",
                 "type": "uint256",
                 "internalType": "uint256"
             }
@@ -128,7 +222,44 @@
     },
     {
         "type": "function",
-        "name": "lastPriceUpdate",
+        "name": "getTokenAddresses",
+        "inputs": [
+            {
+                "name": "pairId",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address",
+                "internalType": "address"
+            },
+            {
+                "name": "",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "owner",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "pairCount",
         "inputs": [],
         "outputs": [
             {
@@ -138,6 +269,62 @@
             }
         ],
         "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "recoverTokens",
+        "inputs": [
+            {
+                "name": "pairId",
+                "type": "uint256",
+                "internalType": "uint256"
+            },
+            {
+                "name": "tokenAddress",
+                "type": "address",
+                "internalType": "address"
+            },
+            {
+                "name": "amount",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+    },
+    {
+        "type": "function",
+        "name": "renounceOwnership",
+        "inputs": [],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+    },
+    {
+        "type": "function",
+        "name": "revokeRiskManager",
+        "inputs": [
+            {
+                "name": "riskManager",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+    },
+    {
+        "type": "function",
+        "name": "revokeTrader",
+        "inputs": [
+            {
+                "name": "trader",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
     },
     {
         "type": "function",
@@ -148,19 +335,6 @@
                 "name": "",
                 "type": "address",
                 "internalType": "contract AggregatorV3Interface"
-            }
-        ],
-        "stateMutability": "view"
-    },
-    {
-        "type": "function",
-        "name": "stableReserve",
-        "inputs": [],
-        "outputs": [
-            {
-                "name": "",
-                "type": "uint256",
-                "internalType": "uint256"
             }
         ],
         "stateMutability": "view"
@@ -183,6 +357,11 @@
         "name": "swap",
         "inputs": [
             {
+                "name": "pairId",
+                "type": "uint256",
+                "internalType": "uint256"
+            },
+            {
                 "name": "buyVolatile",
                 "type": "bool",
                 "internalType": "bool"
@@ -204,12 +383,129 @@
     },
     {
         "type": "function",
-        "name": "updateStablePrice",
+        "name": "swapFor",
         "inputs": [
             {
-                "name": "_newPrice",
+                "name": "pairId",
+                "type": "uint256",
+                "internalType": "uint256"
+            },
+            {
+                "name": "trader",
+                "type": "address",
+                "internalType": "address"
+            },
+            {
+                "name": "buyVolatile",
+                "type": "bool",
+                "internalType": "bool"
+            },
+            {
+                "name": "amountIn",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "outputs": [
+            {
+                "name": "amountOut",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "nonpayable"
+    },
+    {
+        "type": "function",
+        "name": "tokenPairs",
+        "inputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "outputs": [
+            {
+                "name": "stableToken",
+                "type": "address",
+                "internalType": "contract IERC20"
+            },
+            {
+                "name": "volatileToken",
+                "type": "address",
+                "internalType": "contract IERC20"
+            },
+            {
+                "name": "stableFeed",
+                "type": "address",
+                "internalType": "contract AggregatorV3Interface"
+            },
+            {
+                "name": "volatileFeed",
+                "type": "address",
+                "internalType": "contract AggregatorV3Interface"
+            },
+            {
+                "name": "stableReserve",
+                "type": "uint256",
+                "internalType": "uint256"
+            },
+            {
+                "name": "volatileReserve",
+                "type": "uint256",
+                "internalType": "uint256"
+            },
+            {
+                "name": "currentStablePrice",
                 "type": "int256",
                 "internalType": "int256"
+            },
+            {
+                "name": "currentVolatilePrice",
+                "type": "int256",
+                "internalType": "int256"
+            },
+            {
+                "name": "lastPriceUpdate",
+                "type": "uint256",
+                "internalType": "uint256"
+            },
+            {
+                "name": "active",
+                "type": "bool",
+                "internalType": "bool"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "tokenToPairId",
+        "inputs": [
+            {
+                "name": "",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "transferOwnership",
+        "inputs": [
+            {
+                "name": "newOwner",
+                "type": "address",
+                "internalType": "address"
             }
         ],
         "outputs": [],
@@ -217,12 +513,12 @@
     },
     {
         "type": "function",
-        "name": "updateVolatilePrice",
+        "name": "updatePrice",
         "inputs": [
             {
-                "name": "_newPrice",
-                "type": "int256",
-                "internalType": "int256"
+                "name": "pairId",
+                "type": "uint256",
+                "internalType": "uint256"
             }
         ],
         "outputs": [],
@@ -237,19 +533,6 @@
                 "name": "",
                 "type": "address",
                 "internalType": "contract AggregatorV3Interface"
-            }
-        ],
-        "stateMutability": "view"
-    },
-    {
-        "type": "function",
-        "name": "volatileReserve",
-        "inputs": [],
-        "outputs": [
-            {
-                "name": "",
-                "type": "uint256",
-                "internalType": "uint256"
             }
         ],
         "stateMutability": "view"
@@ -271,6 +554,12 @@
         "type": "event",
         "name": "LiquidityAdded",
         "inputs": [
+            {
+                "name": "pairId",
+                "type": "uint256",
+                "indexed": true,
+                "internalType": "uint256"
+            },
             {
                 "name": "provider",
                 "type": "address",
@@ -294,8 +583,33 @@
     },
     {
         "type": "event",
+        "name": "OwnershipTransferred",
+        "inputs": [
+            {
+                "name": "previousOwner",
+                "type": "address",
+                "indexed": true,
+                "internalType": "address"
+            },
+            {
+                "name": "newOwner",
+                "type": "address",
+                "indexed": true,
+                "internalType": "address"
+            }
+        ],
+        "anonymous": false
+    },
+    {
+        "type": "event",
         "name": "PortfolioValueUpdated",
         "inputs": [
+            {
+                "name": "pairId",
+                "type": "uint256",
+                "indexed": true,
+                "internalType": "uint256"
+            },
             {
                 "name": "totalValue",
                 "type": "uint256",
@@ -307,8 +621,65 @@
     },
     {
         "type": "event",
+        "name": "PricesUpdated",
+        "inputs": [
+            {
+                "name": "pairId",
+                "type": "uint256",
+                "indexed": true,
+                "internalType": "uint256"
+            },
+            {
+                "name": "stablePrice",
+                "type": "int256",
+                "indexed": false,
+                "internalType": "int256"
+            },
+            {
+                "name": "volatilePrice",
+                "type": "int256",
+                "indexed": false,
+                "internalType": "int256"
+            }
+        ],
+        "anonymous": false
+    },
+    {
+        "type": "event",
+        "name": "RiskManagerAuthorized",
+        "inputs": [
+            {
+                "name": "riskManager",
+                "type": "address",
+                "indexed": true,
+                "internalType": "address"
+            }
+        ],
+        "anonymous": false
+    },
+    {
+        "type": "event",
+        "name": "RiskManagerRevoked",
+        "inputs": [
+            {
+                "name": "riskManager",
+                "type": "address",
+                "indexed": true,
+                "internalType": "address"
+            }
+        ],
+        "anonymous": false
+    },
+    {
+        "type": "event",
         "name": "Swapped",
         "inputs": [
+            {
+                "name": "pairId",
+                "type": "uint256",
+                "indexed": true,
+                "internalType": "uint256"
+            },
             {
                 "name": "trader",
                 "type": "address",
@@ -335,6 +706,197 @@
             }
         ],
         "anonymous": false
+    },
+    {
+        "type": "event",
+        "name": "TokenPairAdded",
+        "inputs": [
+            {
+                "name": "pairId",
+                "type": "uint256",
+                "indexed": true,
+                "internalType": "uint256"
+            },
+            {
+                "name": "stablePrice",
+                "type": "int256",
+                "indexed": false,
+                "internalType": "int256"
+            },
+            {
+                "name": "volatilePrice",
+                "type": "int256",
+                "indexed": false,
+                "internalType": "int256"
+            }
+        ],
+        "anonymous": false
+    },
+    {
+        "type": "event",
+        "name": "TokenPairDeactivated",
+        "inputs": [
+            {
+                "name": "pairId",
+                "type": "uint256",
+                "indexed": true,
+                "internalType": "uint256"
+            }
+        ],
+        "anonymous": false
+    },
+    {
+        "type": "event",
+        "name": "TraderAuthorized",
+        "inputs": [
+            {
+                "name": "trader",
+                "type": "address",
+                "indexed": true,
+                "internalType": "address"
+            }
+        ],
+        "anonymous": false
+    },
+    {
+        "type": "event",
+        "name": "TraderRevoked",
+        "inputs": [
+            {
+                "name": "trader",
+                "type": "address",
+                "indexed": true,
+                "internalType": "address"
+            }
+        ],
+        "anonymous": false
+    },
+    {
+        "type": "error",
+        "name": "Exchange__AlreadyAuthorized",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__AlreadyAuthorizedRiskManager",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__CannotRecoverPairTokens",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__InsufficientReserves",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__InvalidAmount",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__InvalidFeedAddress",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__InvalidPairId",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__InvalidStablePrice",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__InvalidTokenAddressOrFeed",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__InvalidTraderAddress",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__InvalidVolatilePrice",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__MaxPairsReached",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__NoTokensReceived",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__PairAlreadyExists",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__PairInactive",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__StablePriceStale",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__StableRoundNotComplete",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__UnauthorizedRiskManager",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__UnauthorizedTrader",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__VolatilePriceStale",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "Exchange__VolatileRoundNotComplete",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "OwnableInvalidOwner",
+        "inputs": [
+            {
+                "name": "owner",
+                "type": "address",
+                "internalType": "address"
+            }
+        ]
+    },
+    {
+        "type": "error",
+        "name": "OwnableUnauthorizedAccount",
+        "inputs": [
+            {
+                "name": "account",
+                "type": "address",
+                "internalType": "address"
+            }
+        ]
     },
     {
         "type": "error",

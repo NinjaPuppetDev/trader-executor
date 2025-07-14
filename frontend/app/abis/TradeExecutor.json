@@ -3,22 +3,36 @@
         "type": "constructor",
         "inputs": [
             {
-                "name": "_stableToken",
-                "type": "address",
-                "internalType": "address"
-            },
-            {
-                "name": "_volatileToken",
-                "type": "address",
-                "internalType": "address"
-            },
-            {
                 "name": "_exchange",
                 "type": "address",
                 "internalType": "address"
+            },
+            {
+                "name": "_pairId",
+                "type": "uint256",
+                "internalType": "uint256"
             }
         ],
         "stateMutability": "nonpayable"
+    },
+    {
+        "type": "function",
+        "name": "entryPrices",
+        "inputs": [
+            {
+                "name": "",
+                "type": "bytes32",
+                "internalType": "bytes32"
+            }
+        ],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
     },
     {
         "type": "function",
@@ -58,14 +72,54 @@
     },
     {
         "type": "function",
-        "name": "getTokenAddresses",
+        "name": "getEntryPrice",
+        "inputs": [
+            {
+                "name": "positionId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+            }
+        ],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "getExchange",
         "inputs": [],
         "outputs": [
             {
                 "name": "",
                 "type": "address",
                 "internalType": "address"
-            },
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "getStableToken",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "getVolatileToken",
+        "inputs": [],
+        "outputs": [
             {
                 "name": "",
                 "type": "address",
@@ -86,6 +140,45 @@
             }
         ],
         "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "pairId",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "riskManager",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address",
+                "internalType": "contract RiskManager"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "setRiskManager",
+        "inputs": [
+            {
+                "name": "_riskManager",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
     },
     {
         "type": "function",
@@ -115,6 +208,13 @@
     },
     {
         "type": "function",
+        "name": "verifyInitialization",
+        "inputs": [],
+        "outputs": [],
+        "stateMutability": "view"
+    },
+    {
+        "type": "function",
         "name": "volatileToken",
         "inputs": [],
         "outputs": [
@@ -125,24 +225,6 @@
             }
         ],
         "stateMutability": "view"
-    },
-    {
-        "type": "function",
-        "name": "withdrawTokens",
-        "inputs": [
-            {
-                "name": "token",
-                "type": "address",
-                "internalType": "address"
-            },
-            {
-                "name": "amount",
-                "type": "uint256",
-                "internalType": "uint256"
-            }
-        ],
-        "outputs": [],
-        "stateMutability": "nonpayable"
     },
     {
         "type": "event",
@@ -159,6 +241,43 @@
                 "type": "address",
                 "indexed": true,
                 "internalType": "address"
+            }
+        ],
+        "anonymous": false
+    },
+    {
+        "type": "event",
+        "name": "PositionOpened",
+        "inputs": [
+            {
+                "name": "positionId",
+                "type": "bytes32",
+                "indexed": true,
+                "internalType": "bytes32"
+            },
+            {
+                "name": "trader",
+                "type": "address",
+                "indexed": true,
+                "internalType": "address"
+            },
+            {
+                "name": "isLong",
+                "type": "bool",
+                "indexed": false,
+                "internalType": "bool"
+            },
+            {
+                "name": "amount",
+                "type": "uint256",
+                "indexed": false,
+                "internalType": "uint256"
+            },
+            {
+                "name": "entryPrice",
+                "type": "uint256",
+                "indexed": false,
+                "internalType": "uint256"
             }
         ],
         "anonymous": false
@@ -189,7 +308,7 @@
             {
                 "name": "buyVolatile",
                 "type": "bool",
-                "indexed": false,
+                "indexed": true,
                 "internalType": "bool"
             },
             {
@@ -222,5 +341,30 @@
                 "internalType": "address"
             }
         ]
+    },
+    {
+        "type": "error",
+        "name": "TradeExecutor__AmountMustBeMorethanZero",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "TradeExecutor__InsufficientBalance",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "TradeExecutor__MinAmountOutMustBeMorethanZero",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "TradeExecutor__UnauthorizedOwner",
+        "inputs": []
+    },
+    {
+        "type": "error",
+        "name": "TradeExecutor__UnauthorizedRiskManger",
+        "inputs": []
     }
 ]
