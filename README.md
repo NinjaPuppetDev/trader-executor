@@ -52,6 +52,8 @@ make run-trader
 
 make run-portfolio-monitor
 
+cd frontend && npx ts-node --project tsconfig.backend.json backend/riskManagerService.ts
+
 make run-trainer
 
 make run-price-updater 

@@ -81,6 +81,10 @@ export class MarketDataCollector {
     }, delay);
   }
 
+  public isReady(): boolean {
+    return this.currentMarketState !== null;
+  }
+
   private resetDataBuffers() {
     this.priceHistory = [];
     this.volumeHistory = [];
@@ -135,6 +139,7 @@ export class MarketDataCollector {
       averageVolume: this.calculateAverageVolume(),
       timestamp: Date.now(),
       symbol: this.symbol,
+      regime: 'transitioning',
       additional: {
         high: this.additionalData.high,
         low: this.additionalData.low,
@@ -159,6 +164,11 @@ export class MarketDataCollector {
       trend: signal.state.includes('up') ? 'uptrend' :
         signal.state.includes('down') ? 'downtrend' : 'neutral'
     };
+
+    // Update regime with actual detection
+    marketState.regime = signal.state.includes('STRONG') ? 'trending' :
+      signal.state.includes('VOLATILE') ? 'volatile' :
+        signal.state.includes('CONSOLIDATING') ? 'consolidating' : 'transitioning';
 
     this.currentMarketState = marketState;
   }

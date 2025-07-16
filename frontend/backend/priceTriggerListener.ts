@@ -14,12 +14,9 @@ import {
     ApiDebugLog
 } from "../backend/shared/entities";
 import { AppDataSource } from "../backend/shared/database";
-import { TradingDecision } from "./types";
+import { TradingDecision, BayesianRegressionResult } from "./types";
 import ExchangeAbi from "../app/abis/Exchange.json";
-import TradeExecutorAbi from "../app/abis/TradeExecutor.json";
 import { MarketDataCollector } from "./utils/marketDataCollector";
-import { BayesianRegressionResult } from './types';
-
 
 
 dotenv.config();
@@ -32,7 +29,6 @@ const STABLE_TOKEN = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
 const VOLATILE_TOKEN = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
 const STABLE_TOKEN_CHECKSUM = ethers.utils.getAddress(STABLE_TOKEN);
 const VOLATILE_TOKEN_CHECKSUM = ethers.utils.getAddress(VOLATILE_TOKEN);
-
 
 const CONFIG = {
     VENICE_API_KEY: process.env.VENICE_API_KEY || "",
@@ -49,18 +45,15 @@ const CONFIG = {
 // ======================
 // Price Trigger Listener
 // ======================
-class PriceTriggerListener {
+export class PriceTriggerListener {
     private provider: ethers.providers.JsonRpcProvider;
     private priceTriggerContract: ethers.Contract;
     private graphQLClient: GraphQLClient;
     private isProcessing: boolean = false;
     private lastEventTime: number = 0;
     private exchangeContract: ethers.Contract;
-    private signer: ethers.Signer;
-    private tradeExecutorContract: ethers.Contract;
     private marketDataCollector: MarketDataCollector;
     private promptService: PromptService;
-
 
     constructor() {
         this.provider = new ethers.providers.JsonRpcProvider(CONFIG.RPC_URL);
@@ -77,11 +70,7 @@ class PriceTriggerListener {
         );
 
         this.graphQLClient = new GraphQLClient(CONFIG.GRAPHQL_ENDPOINT);
-
-        // Initialize market data collector
         this.marketDataCollector = new MarketDataCollector(CONFIG.TRADING_PAIR);
-
-        // Initialize PromptService
         this.promptService = new PromptService(
             this.marketDataCollector,
             STABLE_TOKEN_CHECKSUM,
@@ -89,7 +78,6 @@ class PriceTriggerListener {
             CONFIG.TRADING_PAIR
         );
 
-        // Initialize database connection
         this.initializeDatabase();
     }
 
@@ -103,15 +91,11 @@ class PriceTriggerListener {
         }
     }
 
-
     async start() {
         this.marketDataCollector.start();
         this.log(`🔌 Connected to ${CONFIG.TRADING_PAIR} market data stream`);
         this.log("🚀 Starting Price Trigger Listener");
         this.log("🔔 Listening for price spikes to trigger AI analysis");
-        this.log(`🔑 Stable Token: ${STABLE_TOKEN_CHECKSUM}`);
-        this.log(`🔑 Volatile Token: ${VOLATILE_TOKEN_CHECKSUM}`);
-        this.log(`🔑 Exchange Address: ${CONFIG.EXCHANGE_ADDRESS}`);
 
         try {
             const network = await this.provider.getNetwork();
@@ -178,6 +162,7 @@ class PriceTriggerListener {
         const eventId = `spike-${event.blockNumber}-${event.transactionIndex}`;
 
         try {
+            await this.waitForMarketDataReady();
             // 1. Create log entry
             const logEntry = new PriceDetectionLog();
             logEntry.id = eventId;
@@ -185,6 +170,7 @@ class PriceTriggerListener {
             logEntry.eventTxHash = event.transactionHash;
             logEntry.eventBlockNumber = event.blockNumber;
             logEntry.createdAt = new Date().toISOString();
+            logEntry.regime = 'transitioning';
 
             // 2. Get pair details with fallback
             let pairId: number;
@@ -221,15 +207,14 @@ class PriceTriggerListener {
             // 6. Generate AI prompt
             const promptResult = await this.promptService.generatePromptConfig(currentPriceNum);
             const basePrompt = promptResult.config;
-            const bayesianAnalysis = promptResult.bayesianAnalysis;
+            const marketState = this.marketDataCollector.getCurrentMarketState();
+            const bayesianAnalysis = marketState?.bayesianAnalysis || promptResult.bayesianAnalysis;
 
             const enhancedPrompt = this.enhancePromptWithSpike(
                 basePrompt,
                 currentPriceNum,
                 previousPriceNum,
-                changePercentNum,
-                stableToken,
-                volatileToken
+                changePercentNum
             );
 
             const promptString = JSON.stringify(enhancedPrompt);
@@ -243,7 +228,7 @@ class PriceTriggerListener {
                 stableToken,
                 volatileToken,
                 currentPriceNum,
-                bayesianAnalysis  // Now properly defined
+                bayesianAnalysis
             );
 
             // 8. Update log with decision
@@ -256,12 +241,12 @@ class PriceTriggerListener {
             logEntry.stopLoss = tradingDecision.stopLoss;
             logEntry.takeProfit = tradingDecision.takeProfit;
 
-            // 9. Set status for Trade Executor (KEY CHANGE)
-            logEntry.status = "completed"; // Always mark as completed for Trade Executor
+            // 9. Set status for Trade Executor
+            logEntry.status = "completed";
 
             // 10. Save to database
             await AppDataSource.manager.save(logEntry);
-            await this.logDetectionToGraphQL(logEntry);
+            await this.logDetectionToGraphQL(logEntry, bayesianAnalysis);
             this.log(`✅ Spike processed. Sent to Trade Executor in ${Date.now() - startTime}ms`);
 
         } catch (error) {
@@ -277,8 +262,6 @@ class PriceTriggerListener {
             errorLog.eventBlockNumber = event.blockNumber;
             errorLog.status = "failed";
             errorLog.error = errorMsg;
-
-            // Set required fields with default values
             errorLog.pairId = parseInt(CONFIG.PAIR_ID);
             errorLog.priceContext = "Error context";
             errorLog.decision = "{}";
@@ -295,57 +278,47 @@ class PriceTriggerListener {
         }
     }
 
-
-
-    // Helper function to calculate minimum output with slippage
-    private async calculateMinAmountOut(
-        buyVolatile: boolean,
-        amountIn: ethers.BigNumber,
-        slippageBasisPoints: number,
-        pairId: number
-    ): Promise<ethers.BigNumber> {
-        try {
-            // Get current reserves
-            const [stableReserve, volatileReserve] = await this.exchangeContract.getReserves(pairId);
-
-            // Calculate expected output
-            let expectedOut: ethers.BigNumber;
-            if (buyVolatile) {
-                expectedOut = amountIn.mul(volatileReserve).div(stableReserve.add(amountIn));
-            } else {
-                expectedOut = amountIn.mul(stableReserve).div(volatileReserve.add(amountIn));
+    private async waitForMarketDataReady(timeout = 30000): Promise<void> {
+        const start = Date.now();
+        while (!this.marketDataCollector.isReady()) {
+            if (Date.now() - start > timeout) {
+                throw new Error("Market data initialization timeout");
             }
-
-            // Apply slippage tolerance
-            return expectedOut.mul(10000 - slippageBasisPoints).div(10000);
-
-        } catch (error) {
-            this.error("Slippage calculation failed, using fallback", error);
-            return ethers.BigNumber.from(1); // Minimum possible amount
+            await new Promise(resolve => setTimeout(resolve, 500));
         }
     }
 
-    // Helper function to extract position details from transaction receipt
-    private getPositionDetailsFromReceipt(receipt: ethers.ContractReceipt): { id: string, entryPrice: string } | null {
-        const eventInterface = new ethers.utils.Interface(TradeExecutorAbi);
 
-        for (const log of receipt.logs) {
-            try {
-                const parsedLog = eventInterface.parseLog(log);
-                if (parsedLog.name === "PositionOpened") {
-                    return {
-                        id: parsedLog.args.positionId,
-                        entryPrice: parsedLog.args.entryPrice.toString()
-                    };
+    private enhancePromptWithSpike(
+        basePrompt: any,
+        currentPrice: number,
+        previousPrice: number,
+        changePercent: number
+    ): any {
+        const direction = currentPrice > previousPrice ? "up" : "down";
+        const priceChange = Math.abs(changePercent);
+        const volatilityLevel = priceChange < 2 ? "low" :
+            priceChange < 5 ? "medium" :
+                priceChange < 10 ? "high" : "extreme";
+
+        return {
+            ...basePrompt,
+            market_context: {
+                ...(basePrompt.market_context || {}),
+                price_event: {
+                    type: "spike",
+                    direction,
+                    change_percent: priceChange,
+                    current_price: currentPrice,
+                    previous_price: previousPrice,
+                    volatility_level: volatilityLevel
                 }
-            } catch {
-                // Skip unparseable logs
-            }
-        }
-        return null;
+            },
+            instructions: `${basePrompt.instructions}\n\nIMPORTANT: Price spike detected (${priceChange.toFixed(2)}% ${direction})`
+        };
     }
 
-    private async logDetectionToGraphQL(log: PriceDetectionLog) {
+    private async logDetectionToGraphQL(log: PriceDetectionLog, analysis: BayesianRegressionResult) {
         const mutation = gql`
         mutation LogDetection($entry: DetectionInput!) {
             logDetection(entry: $entry)
@@ -379,8 +352,7 @@ class PriceTriggerListener {
                     tradeTxHash: log.tradeTxHash || null,
                     riskManagerTxHash: log.riskManagerTxHash || null,
                     entryPrice: log.entryPrice || null,
-                    bayesianAnalysis: log.bayesianAnalysis
-
+                    bayesianAnalysis: JSON.stringify(analysis)
                 }
             });
             this.log(`📤 Logged detection to GraphQL: ${log.id}`);
@@ -395,17 +367,16 @@ class PriceTriggerListener {
         stableToken: string,
         volatileToken: string,
         currentPrice: number,
-        bayesianAnalysis: BayesianRegressionResult
+        analysis: BayesianRegressionResult
     ): Promise<TradingDecision> {
         this.debugLog(`Raw signal (${signal.length} chars): ${signal.substring(0, 300)}${signal.length > 300 ? '...' : ''}`);
 
         const debugEntry = new ApiDebugLog();
         debugEntry.id = eventId;
         debugEntry.timestamp = new Date().toISOString();
-        debugEntry.prompt = "";
         debugEntry.rawResponse = signal;
 
-        // Fallback decision with all required properties
+        // Fallback decision
         const fallbackDecision: TradingDecision = {
             decision: 'hold',
             tokenIn: ZERO_ADDRESS,
@@ -418,24 +389,21 @@ class PriceTriggerListener {
             takeProfit: 0
         };
 
-        // Initialize parsedDecision in debug entry
         debugEntry.parsedDecision = JSON.stringify(fallbackDecision);
 
         try {
-            // First attempt: parse as JSON
+            // Parse as JSON
             try {
                 const decision = JSON.parse(signal);
                 this.debugLog("✅ Successfully parsed JSON");
-                const validated = this.validateDecisionStructure(decision, stableToken, volatileToken, currentPrice, bayesianAnalysis);
+                const validated = this.validateDecisionStructure(decision, stableToken, volatileToken, currentPrice, analysis);
                 debugEntry.parsedDecision = JSON.stringify(validated);
-                await this.saveDebugLog(debugEntry);
                 return validated;
             } catch (primaryError) {
                 debugEntry.error = primaryError instanceof Error ? primaryError.message : 'JSON parse failed';
-                this.debugLog(`❌ JSON parse failed: ${debugEntry.error}`);
             }
 
-            // Second attempt: extract JSON from string
+            // Extract JSON from string
             try {
                 const startIndex = signal.indexOf('{');
                 const endIndex = signal.lastIndexOf('}');
@@ -443,35 +411,29 @@ class PriceTriggerListener {
                     const candidate = signal.substring(startIndex, endIndex + 1);
                     const parsed = JSON.parse(candidate);
                     this.debugLog(`✅ Extracted JSON with bracket matching`);
-                    const validated = this.validateDecisionStructure(parsed, stableToken, volatileToken, currentPrice, bayesianAnalysis);
+                    const validated = this.validateDecisionStructure(parsed, stableToken, volatileToken, currentPrice, analysis);
                     debugEntry.parsedDecision = JSON.stringify(validated);
-                    await this.saveDebugLog(debugEntry);
                     return validated;
                 }
             } catch (bracketError) {
                 debugEntry.error += bracketError instanceof Error ? ` | ${bracketError.message}` : ' | Bracket matching failed';
-                this.debugLog(`Bracket matching failed`);
             }
 
-            // Third attempt: regex extraction
+            // Regex extraction
             try {
                 const jsonRegex = /{(?:[^{}]|{[^{}]*})*}/;
                 const match = signal.match(jsonRegex);
                 if (match) {
                     const parsed = JSON.parse(match[0]);
                     this.debugLog(`✅ Extracted JSON with regex`);
-                    const validated = this.validateDecisionStructure(parsed, stableToken, volatileToken, currentPrice, bayesianAnalysis);
+                    const validated = this.validateDecisionStructure(parsed, stableToken, volatileToken, currentPrice, analysis);
                     debugEntry.parsedDecision = JSON.stringify(validated);
-                    await this.saveDebugLog(debugEntry);
                     return validated;
                 }
             } catch (regexError) {
                 debugEntry.error += regexError instanceof Error ? ` | ${regexError.message}` : ' | Regex extraction failed';
-                this.debugLog(`Regex extraction failed`);
             }
 
-            this.debugLog("❌ All parsing methods failed");
-            debugEntry.error = "All parsing methods failed";
             return fallbackDecision;
         } finally {
             await this.saveDebugLog(debugEntry);
@@ -487,7 +449,6 @@ class PriceTriggerListener {
             this.debugLog(`📝 Debug log saved: ${entry.id}`);
         } catch (error) {
             this.debugLog(`❌ Failed to save debug log to DB: ${error}`);
-            this.debugLog(`[DebugLog] ${JSON.stringify(entry)}`);
         }
     }
 
@@ -496,7 +457,7 @@ class PriceTriggerListener {
         stableToken: string,
         volatileToken: string,
         currentPrice: number,
-        bayesianAnalysis: BayesianRegressionResult
+        analysis: BayesianRegressionResult
     ): TradingDecision {
         if (!decision || typeof decision !== 'object') {
             throw new Error("Decision must be a valid object");
@@ -529,24 +490,22 @@ class PriceTriggerListener {
             decision,
             currentPrice,
             action,
-            bayesianAnalysis
+            analysis
         );
 
-        // 6. Validate slippage
-        const slippage = this.validateSlippage(decision, bayesianAnalysis.volatility);
+        // 6. Validate slippage using volatility from Bayesian analysis
+        const slippage = this.validateSlippage(decision, analysis.volatility);
 
         // 7. Validate confidence level
         const confidence = this.validateConfidence(decision);
 
-        // 8. Validate position sizing
+        // 8. Validate position sizing using probability
         this.validatePositionSize(
             amount,
-            currentPrice,
-            bayesianAnalysis,
             action,
             tokenIn,
             stableToken,
-            volatileToken
+            analysis
         );
 
         return {
@@ -565,18 +524,6 @@ class PriceTriggerListener {
     // ======== HELPER METHODS ========
 
     private validateHoldDecision(decision: any): TradingDecision {
-        const isValid =
-            decision.tokenIn === ZERO_ADDRESS &&
-            decision.tokenOut === ZERO_ADDRESS &&
-            decision.amount === "0" &&
-            (decision.slippage === 0 || decision.slippage === undefined) &&
-            (decision.stopLoss === 0 || decision.stopLoss === undefined) &&
-            (decision.takeProfit === 0 || decision.takeProfit === undefined);
-
-        if (!isValid) {
-            throw new Error("Invalid hold format: Must use zero addresses, zero amount, and no risk parameters");
-        }
-
         return {
             decision: 'hold',
             tokenIn: ZERO_ADDRESS,
@@ -637,7 +584,7 @@ class PriceTriggerListener {
         decision: any,
         currentPrice: number,
         action: string,
-        bayesianAnalysis: BayesianRegressionResult
+        analysis: BayesianRegressionResult
     ) {
         if (decision.stopLoss === undefined || decision.takeProfit === undefined) {
             throw new Error(`Risk parameters (stopLoss, takeProfit) are required for ${action}`);
@@ -651,20 +598,20 @@ class PriceTriggerListener {
         }
 
         // Check alignment with Bayesian parameters
-        const slDiff = Math.abs(stopLoss - bayesianAnalysis.stopLoss);
-        const tpDiff = Math.abs(takeProfit - bayesianAnalysis.takeProfit);
+        const slDiff = Math.abs(stopLoss - analysis.stopLoss);
+        const tpDiff = Math.abs(takeProfit - analysis.takeProfit);
 
         if (slDiff > currentPrice * 0.01) {
             throw new Error(
                 `Stop loss differs >1% from Bayesian value ` +
-                `(${stopLoss} vs ${bayesianAnalysis.stopLoss})`
+                `(${stopLoss} vs ${analysis.stopLoss})`
             );
         }
 
         if (tpDiff > currentPrice * 0.01) {
             throw new Error(
                 `Take profit differs >1% from Bayesian value ` +
-                `(${takeProfit} vs ${bayesianAnalysis.takeProfit})`
+                `(${takeProfit} vs ${analysis.takeProfit})`
             );
         }
 
@@ -676,9 +623,6 @@ class PriceTriggerListener {
             if (takeProfit <= currentPrice) {
                 throw new Error(`BUY take profit must be ABOVE current price (${currentPrice})`);
             }
-            if (stopLoss >= takeProfit) {
-                throw new Error(`BUY stop loss (${stopLoss}) must be below take profit (${takeProfit})`);
-            }
         } else if (action === 'sell') {
             if (stopLoss <= currentPrice) {
                 throw new Error(`SELL stop loss must be ABOVE current price (${currentPrice})`);
@@ -686,18 +630,6 @@ class PriceTriggerListener {
             if (takeProfit >= currentPrice) {
                 throw new Error(`SELL take profit must be BELOW current price (${currentPrice})`);
             }
-            if (takeProfit >= stopLoss) {
-                throw new Error(`SELL take profit (${takeProfit}) must be below stop loss (${stopLoss})`);
-            }
-        }
-
-        // Validate risk-reward ratio
-        const priceDiff = Math.abs(takeProfit - stopLoss);
-        const minDistance = currentPrice * 0.01; // 1% minimum
-        if (priceDiff < minDistance) {
-            throw new Error(
-                `Risk parameters too close: Minimum ${minDistance.toFixed(2)} spread required`
-            );
         }
 
         return { stopLoss, takeProfit };
@@ -731,78 +663,30 @@ class PriceTriggerListener {
     }
 
     private validatePositionSize(
-        amount: number,   // in the input token (stable for buy, ETH for sell)
-        currentPrice: number,
-        bayesianAnalysis: BayesianRegressionResult,
+        amount: number,
         action: string,
         tokenIn: string,
         stableToken: string,
-        volatileToken: string
+        analysis: BayesianRegressionResult
     ) {
-        // Get expected size in ETH based on Bayesian deviation
-        const stdDev = Math.sqrt(bayesianAnalysis.variance);
-        const priceDeviation = Math.abs(
-            (currentPrice - bayesianAnalysis.predictedPrice) / stdDev
-        );
+        // Get expected size based on probability
+        let expectedAmount = 0;
+        if (analysis.probability > 0.8) expectedAmount = 0.04;
+        else if (analysis.probability > 0.65) expectedAmount = 0.03;
 
-        const cappedDeviation = Math.min(priceDeviation, 3);
-
-        let expectedAmountETH = 0;
-        if (cappedDeviation > 2) expectedAmountETH = 0.04;
-        else if (cappedDeviation > 1) expectedAmountETH = 0.03;
-
-        // Convert expected amount to the input token
-        let expectedAmountInInputToken: number;
+        // Convert to input token if needed
         if (action === 'buy' && tokenIn === stableToken) {
-            // For buy, input token is stable -> expected amount in stable = expectedAmountETH * currentPrice
-            expectedAmountInInputToken = expectedAmountETH * currentPrice;
-        } else if (action === 'sell' && tokenIn === volatileToken) {
-            // For sell, input token is ETH -> expected amount in ETH = expectedAmountETH
-            expectedAmountInInputToken = expectedAmountETH;
-        } else {
-            // Fallback to ETH (shouldn't happen due to earlier validation)
-            expectedAmountInInputToken = expectedAmountETH;
+            expectedAmount *= analysis.predictedPrice;
         }
 
         // Allow 10% tolerance
-        const tolerance = expectedAmountInInputToken * 0.1;
-        if (Math.abs(amount - expectedAmountInInputToken) > tolerance) {
+        const tolerance = expectedAmount * 0.1;
+        if (expectedAmount > 0 && Math.abs(amount - expectedAmount) > tolerance) {
             throw new Error(
-                `Position size ${amount} ${tokenIn} doesn't match expected ${expectedAmountInInputToken.toFixed(4)} ` +
-                `for ${cappedDeviation.toFixed(1)}σ deviation (calculated from ${priceDeviation.toFixed(1)}σ)`
+                `Position size ${amount} doesn't match expected ${expectedAmount.toFixed(4)} ` +
+                `for probability ${analysis.probability}`
             );
         }
-    }
-
-    private enhancePromptWithSpike(
-        basePrompt: any, currentPrice: number, previousPrice: number, changePercent: number, stableToken: string, volatileToken: string): any {
-        const direction = currentPrice > previousPrice ? "up" : "down";
-        const volatilityLevel = this.getVolatilityLevel(changePercent);
-        const priceChange = Math.abs(changePercent);
-
-        return {
-            ...basePrompt,
-            market_context: {
-                ...(basePrompt.market_context || {}),
-                price_event: {
-                    type: "spike",
-                    direction,
-                    change_percent: priceChange,
-                    current_price: currentPrice,
-                    previous_price: previousPrice,
-                    volatility_level: volatilityLevel
-                }
-            },
-            instructions: `${basePrompt.instructions}\n\nIMPORTANT: Price spike detected (${priceChange.toFixed(2)}% ${direction})`
-        };
-    }
-
-    private getVolatilityLevel(changePercent: number): string {
-        const priceChange = Math.abs(changePercent);
-        if (priceChange < 2) return "low";
-        if (priceChange < 5) return "medium";
-        if (priceChange < 10) return "high";
-        return "extreme";
     }
 
     private async fetchTradingSignal(prompt: string, eventId: string): Promise<string> {
@@ -813,18 +697,10 @@ class PriceTriggerListener {
         debugEntry.id = eventId;
         debugEntry.timestamp = new Date().toISOString();
         debugEntry.prompt = prompt;
-        debugEntry.parsedDecision = JSON.stringify({
-            decision: 'hold',
-            tokenIn: ZERO_ADDRESS,
-            tokenOut: ZERO_ADDRESS,
-            amount: "0",
-            slippage: 0,
-            reasoning: "Initial placeholder"
-        });
 
         try {
             if (!CONFIG.VENICE_API_KEY) {
-                throw new Error("VENICE_API_KEY not set in environment variables");
+                throw new Error("VENICE_API_KEY not set");
             }
 
             const rawSignal = await fetchTradingSignal(prompt, CONFIG.VENICE_API_KEY);
@@ -834,13 +710,18 @@ class PriceTriggerListener {
                 throw new Error(`API returned non-string response: ${typeof rawSignal}`);
             }
 
-            this.debugLog(`Full API response: ${rawSignal}`);
             const hasDecision = /"decision"\s*:\s*["']?(buy|sell|hold)["']?/i.test(rawSignal);
-            const hasTokenIn = /"tokenIn"\s*:\s*["']?0x[a-fA-F0-9]{40}["']?/i.test(rawSignal);
 
-            if (!hasDecision || !hasTokenIn) {
-                this.debugLog(`⚠️ Validation failed - decision: ${hasDecision}, tokenIn: ${hasTokenIn}`);
-                throw new Error("API response missing required fields");
+            if (!hasDecision) {
+                throw new Error("API response missing required field: decision");
+            }
+
+            // Only require tokenIn for buy/sell decisions
+            if (hasDecision && /buy|sell/i.test(rawSignal)) {
+                const hasTokenIn = /"tokenIn"\s*:\s*["']?0x[a-fA-F0-9]{40}["']?/i.test(rawSignal);
+                if (!hasTokenIn) {
+                    throw new Error("API response missing required field: tokenIn for trade");
+                }
             }
 
             return rawSignal;
@@ -855,12 +736,10 @@ class PriceTriggerListener {
                 confidence: "medium"
             };
 
-            const fallbackString = JSON.stringify(fallback);
             debugEntry.error = err instanceof Error ? err.message : "Unknown error";
             debugEntry.parsedDecision = JSON.stringify(fallback);
-            await this.saveDebugLog(debugEntry);
             this.error("API processing failed", err);
-            return fallbackString;
+            return JSON.stringify(fallback);
         } finally {
             await this.saveDebugLog(debugEntry);
         }

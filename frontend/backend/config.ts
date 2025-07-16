@@ -19,6 +19,7 @@ export const CONFIG = {
     chainId: 31337,
     networkName: 'anvil',
     maxGasPrice: ethers.utils.parseUnits('100', 'gwei').toString(),
-    pairId: parseInt(process.env.PAIR_ID || '1')
+    pairId: parseInt(process.env.PAIR_ID || '1'),
+
 };
 

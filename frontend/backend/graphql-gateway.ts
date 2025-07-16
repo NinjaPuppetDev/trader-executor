@@ -84,6 +84,7 @@ const typeDefs = `#graphql
     tradeTxHash: String
     riskManagerTxHash: String
     entryPrice: String
+    regime: String!
     bayesianAnalysis: BayesianRegressionResult
   }
 
@@ -125,6 +126,9 @@ const typeDefs = `#graphql
     trendDirection: String
     volatility: Float
     variance: Float
+    probability: Float
+    zScore: Float
+    regime: String!
   }
 
   type Query {
@@ -198,17 +202,7 @@ const typeDefs = `#graphql
     tradeTxHash: String
     riskManagerTxHash: String
     entryPrice: String
-    bayesianAnalysis: BayesianRegressionInput
-  }
-  
-  input BayesianRegressionInput {
-    predictedPrice: Float
-    confidenceInterval: [Float]
-    stopLoss: Float
-    takeProfit: Float
-    trendDirection: String
-    volatility: Float
-    variance: Float
+    bayesianAnalysis: String  
   }
 
   input DebugInput {
@@ -273,7 +267,6 @@ const resolvers = {
       return repo.findOneBy({ id });
     },
 
-    // NEW: Get single risk position by ID
     getRiskPosition: async (_: any, { id }: { id: string }) => {
       const repo = AppDataSource.getRepository(RiskPosition);
       return repo.findOneBy({ id });
@@ -285,7 +278,6 @@ const resolvers = {
       const repo = AppDataSource.getRepository(TradeExecutionLog);
       const log = new TradeExecutionLog();
 
-      // Apply defaults for optional fields
       Object.assign(log, {
         source: "trade-execution",
         sourceType: "price-detections",
@@ -303,12 +295,22 @@ const resolvers = {
       const repo = AppDataSource.getRepository(PriceDetectionLog);
       const log = new PriceDetectionLog();
 
-      // Apply defaults for optional fields
+      // Parse bayesianAnalysis if it exists
+      let bayesianAnalysis = null;
+      if (entry.bayesianAnalysis) {
+        try {
+          bayesianAnalysis = JSON.parse(entry.bayesianAnalysis);
+        } catch (e) {
+          console.error('Failed to parse bayesianAnalysis', e);
+        }
+      }
+
       Object.assign(log, {
         type: "price-detections",
         createdAt: new Date().toISOString(),
         decisionLength: entry.decision?.length || 0,
-        bayesianAnalysis: entry.bayesianAnalysis,
+        bayesianAnalysis,
+        regime: entry.regime || 'transitioning',
         ...entry
       });
 
@@ -320,7 +322,6 @@ const resolvers = {
       const repo = AppDataSource.getRepository(ApiDebugLog);
       const log = new ApiDebugLog();
 
-      // Apply defaults for optional fields
       Object.assign(log, {
         timestamp: new Date().toISOString(),
         ...entry
@@ -366,7 +367,6 @@ app.get('/health', async (_, res) => {
     if (AppDataSource.isInitialized) {
       dbStatus = "connected";
 
-      // Get counts for all entities
       const riskRepo = AppDataSource.getRepository(RiskPosition);
       const triggerRepo = AppDataSource.getRepository(ProcessedTrigger);
 
@@ -421,7 +421,6 @@ async function startServer() {
     await AppDataSource.initialize();
     console.log("✅ Database connected");
 
-    // Verify all entity repositories
     const repos = {
       detections: AppDataSource.getRepository(PriceDetectionLog),
       trades: AppDataSource.getRepository(TradeExecutionLog),

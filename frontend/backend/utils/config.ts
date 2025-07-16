@@ -42,6 +42,8 @@ export const CONFIG = {
     confidenceThreshold: 60,    // Minimum confidence to trigger
     replayInterval: 100,
 
+    historicalReplaySpeed: 5,
+
 };
 
 // Add type safety

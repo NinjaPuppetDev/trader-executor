@@ -1,5 +1,7 @@
 type LogStatus = "pending" | "completed" | "failed" | "executed" | "skipped";
 type LogSource = "price-detections" | "trade-execution";
+export type MarketRegime = 'trending' | 'volatile' | 'consolidating' | 'transitioning';
+
 
 
 interface BaseLogEntry {
@@ -163,12 +165,16 @@ export interface BayesianRegressionResult {
     trendDirection: 'bullish' | 'bearish' | 'neutral';
     volatility: number;
     variance: number;
+    probability: number;
+    zScore: number;
+    regime: MarketRegime;
 }
 
 export interface MarketDataState {
     prices: number[];
     volumes: number[];
     currentPrice: number;
+    regime: MarketRegime;
     averageVolume: number;
     timestamp: number;
     symbol: string;

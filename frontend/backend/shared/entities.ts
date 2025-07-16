@@ -1,4 +1,5 @@
 import { Entity, PrimaryColumn, Column } from "typeorm";
+import type { MarketRegime, BayesianRegressionResult } from "../types";
 
 @Entity()
 export class PriceDetectionLog {
@@ -80,16 +81,9 @@ export class PriceDetectionLog {
     @Column({ type: "json", nullable: true })
     bayesianAnalysis?: BayesianRegressionResult;
 
-}
+    @Column({ type: "varchar" })
+    regime!: MarketRegime;
 
-export interface BayesianRegressionResult {
-    predictedPrice: number;
-    confidenceInterval: [number, number];
-    stopLoss: number;
-    takeProfit: number;
-    trendDirection: 'bullish' | 'bearish' | 'neutral';
-    volatility: number;
-    variance: number;
 }
 
 

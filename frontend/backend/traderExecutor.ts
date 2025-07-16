@@ -121,6 +121,11 @@ async function initializeDatabase() {
 
 async function setupEnvironment() {
     try {
+
+        // Normalize token addresses in config
+        CONFIG.stableToken = ethers.utils.getAddress(CONFIG.stableToken);
+        CONFIG.volatileToken = ethers.utils.getAddress(CONFIG.volatileToken);
+
         provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
         wallet = new ethers.Wallet(CONFIG.privateKey, provider);
         graphQLClient = new GraphQLClient(CONFIG.graphqlEndpoint);
@@ -523,28 +528,47 @@ async function executeTrade(
 }
 
 // ======================
-// Decision Processing
+// Enhanced validateTradeDecision()
 // ======================
 function validateTradeDecision(decision: any): string | null {
+    // Normalize config tokens to checksum format
+    const stableToken = ethers.utils.getAddress(CONFIG.stableToken);
+    const volatileToken = ethers.utils.getAddress(CONFIG.volatileToken);
+
+    const validTokens = [
+        stableToken.toLowerCase(),
+        volatileToken.toLowerCase()
+    ];
+
+    logger.debug(`Config tokens - Stable: ${stableToken}, Volatile: ${volatileToken}`);
+    logger.debug(`Decision tokens - In: ${decision.tokenIn}, Out: ${decision.tokenOut}`);
+
     if (!['buy', 'sell', 'hold'].includes(decision.decision)) {
         return 'Invalid decision type';
     }
 
     if (decision.decision === 'hold') return null;
 
-    const validTokens = [
-        CONFIG.stableToken.toLowerCase(),
-        CONFIG.volatileToken.toLowerCase()
-    ];
+    // Normalize decision tokens for comparison
+    const tokenIn = decision.tokenIn ? ethers.utils.getAddress(decision.tokenIn) : '';
+    const tokenOut = decision.tokenOut ? ethers.utils.getAddress(decision.tokenOut) : '';
 
-    if (!validTokens.includes(decision.tokenIn.toLowerCase()) ||
-        !validTokens.includes(decision.tokenOut.toLowerCase())) {
-        return 'Invalid token addresses';
+    if (!validTokens.includes(tokenIn.toLowerCase()) ||
+        !validTokens.includes(tokenOut.toLowerCase())) {
+        return `Invalid token addresses: ${tokenIn}/${tokenOut}`;
     }
 
-    const amountNum = parseFloat(decision.amount);
-    if (isNaN(amountNum) || amountNum <= 0) {
-        return 'Invalid trade amount';
+    // Parse amount with safety
+    let amountNum: number;
+    try {
+        amountNum = parseFloat(decision.amount);
+        if (isNaN(amountNum)) throw new Error('Not a number');
+    } catch {
+        return 'Invalid trade amount format';
+    }
+
+    if (amountNum <= 0) {
+        return 'Trade amount must be positive';
     }
 
     if (amountNum < parseFloat(CONFIG.minTradeAmount)) {
@@ -558,7 +582,7 @@ function validateTradeDecision(decision: any): string | null {
             maxAmount * 0.5;
 
     if (amountNum > maxAllowed) {
-        return `Amount exceeds ${maxAllowed} limit for ${confidence} confidence`;
+        return `Amount exceeds ${maxAllowed.toFixed(4)} limit for ${confidence} confidence`;
     }
 
     return null;
@@ -577,12 +601,11 @@ function createFallbackDecision(error: string): any {
 }
 
 // ======================
-// Updated Log Processing
+// SQLite-Compatible Log Processing
 // ======================
 async function processLogs() {
     try {
         await ensureContractFunds();
-
         const priceDetectionLogRepo = AppDataSource.getRepository(PriceDetectionLog);
         const processedTriggerRepo = AppDataSource.getRepository(ProcessedTrigger);
         const tradeExecutionLogRepo = AppDataSource.getRepository(TradeExecutionLog);
@@ -609,14 +632,30 @@ async function processLogs() {
 
         for (const log of unprocessedLogs) {
             logger.info(`🔎 Processing log: ${log.id}`);
+
+            // Immediately mark as processing to prevent duplicate handling
+            await priceDetectionLogRepo.update(log.id, { status: 'processing' });
+
             let decision: any = null;
             let tradeResult = null;
             let decisionStatus: string = 'invalid';
             let errorMessage = '';
 
             try {
+                logger.debug(`Raw decision JSON: ${log.decision}`);
+
                 const parsedDecision = JSON.parse(log.decision ?? '{}');
+
+                // Normalize token addresses
+                parsedDecision.tokenIn = parsedDecision.tokenIn
+                    ? ethers.utils.getAddress(parsedDecision.tokenIn)
+                    : '';
+                parsedDecision.tokenOut = parsedDecision.tokenOut
+                    ? ethers.utils.getAddress(parsedDecision.tokenOut)
+                    : '';
+
                 const validationError = validateTradeDecision(parsedDecision);
+                logger.debug(`Decision validation result: ${validationError || 'valid'}`);
 
                 if (validationError) {
                     throw new Error(validationError);
@@ -642,12 +681,10 @@ async function processLogs() {
                 }
             }
 
-            // Create and save trade execution log
+            // Create trade execution log
             const tradeLog = new TradeExecutionLog();
             tradeLog.id = `exec-${Date.now()}`;
             tradeLog.pairId = log.pairId;
-            tradeLog.timestamp = new Date().toISOString();
-            tradeLog.createdAt = new Date().toISOString();
             tradeLog.sourceLogId = log.id;
             tradeLog.status = decisionStatus;
             tradeLog.tokenIn = decision.tokenIn || '';
@@ -663,15 +700,12 @@ async function processLogs() {
             tradeLog.error = errorMessage || null;
             tradeLog.positionId = tradeResult?.positionId ?? null;
             tradeLog.entryPrice = tradeResult?.entryPrice || null;
-
-            // Stringify decision object to avoid constraint error
             tradeLog.decision = JSON.stringify(decision);
 
             try {
                 await tradeExecutionLogRepo.save(tradeLog);
                 logger.info(`📝 Saved trade execution log: ${tradeLog.id}`);
 
-                // Log to GraphQL
                 try {
                     await logTradeToGraphQL(tradeLog);
                     logger.info(`📤 Logged trade to GraphQL: ${tradeLog.id}`);
@@ -682,41 +716,35 @@ async function processLogs() {
                 logger.error(`❌ Failed to save trade log: ${saveError}`);
             }
 
-            // Update original price detection log status (CRITICAL ADDITION)
+            // Update original log status
             try {
-                let newStatus = '';
-
-                switch (decisionStatus) {
-                    case 'executed':
-                        newStatus = 'executed';
-                        break;
-                    case 'skipped':
-                        newStatus = 'hold';
-                        break;
-                    default:
-                        newStatus = 'failed';
-                }
+                let newStatus = decisionStatus === 'executed' ? 'executed' :
+                    decisionStatus === 'skipped' ? 'hold' : 'failed';
 
                 await priceDetectionLogRepo.update(log.id, { status: newStatus });
                 logger.info(`🔄 Updated price detection log status to: ${newStatus}`);
-
             } catch (updateError) {
                 logger.error(`❌ Failed to update price detection log status: ${updateError}`);
             }
 
-            // Mark as processed only if we have a valid trade result or hold decision
+            // Mark as processed
             if (decisionStatus === 'executed' || decisionStatus === 'skipped') {
                 try {
                     const processed = new ProcessedTrigger();
                     processed.id = `trade-${log.id}`;
-                    processed.pairId = log.pairId; // CRITICAL FIX: Add pairId propagation
+                    processed.pairId = log.pairId;
                     await processedTriggerRepo.save(processed);
                     logger.info(`✅ Marked log as processed: trade-${log.id}`);
-                } catch (markError) {
-                    logger.error(`❌ Failed to mark log as processed: ${markError}`);
+                } catch (error) {
+                    // Type-safe error handling
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+
+                    if (errorMessage.includes('SQLITE_CONSTRAINT: UNIQUE')) {
+                        logger.warn(`⚠️ Log already processed: trade-${log.id}`);
+                    } else {
+                        logger.error(`❌ Failed to mark log as processed: ${errorMessage}`);
+                    }
                 }
-            } else {
-                logger.warn(`⚠️ Not marking invalid log as processed: ${log.id}`);
             }
         }
 
