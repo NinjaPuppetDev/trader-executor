@@ -621,6 +621,7 @@ async function processLogs() {
             )
             .where('log.status = :status', { status: 'completed' })
             .andWhere('pt.id IS NULL')
+            .orderBy('log.timestamp', 'ASC')  // Process oldest first
             .getMany();
 
         if (unprocessedLogs.length === 0) {
@@ -681,8 +682,9 @@ async function processLogs() {
                 }
             }
 
-            // Create trade execution log
+            // Create trade execution log with TIMESTAMP FIX
             const tradeLog = new TradeExecutionLog();
+            tradeLog.timestamp = new Date().toISOString();  // FIX: Convert to ISO string format
             tradeLog.id = `exec-${Date.now()}`;
             tradeLog.pairId = log.pairId;
             tradeLog.sourceLogId = log.id;
@@ -714,6 +716,13 @@ async function processLogs() {
                 }
             } catch (saveError) {
                 logger.error(`❌ Failed to save trade log: ${saveError}`);
+                // Add detailed error logging for debugging
+                if (saveError instanceof Error) {
+                    logger.error(`Database error details: ${saveError.message}`);
+                    if (saveError.stack) {
+                        logger.debug(saveError.stack);
+                    }
+                }
             }
 
             // Update original log status
@@ -751,6 +760,10 @@ async function processLogs() {
         logger.info(`✅ Processed ${unprocessedLogs.length} logs`);
     } catch (error) {
         logger.error('❌❌❌ Log processing failed:', error);
+        // Add stack trace for main error
+        if (error instanceof Error && error.stack) {
+            logger.debug(error.stack);
+        }
     }
 }
 
