@@ -228,14 +228,12 @@ export class RiskPosition {
     })
     status: 'active' | 'closed' | 'liquidated';
 
-    // FIXED: Use datetime instead of timestamp
     @Column({ type: 'datetime' })
     createdAt: Date;
 
     @Column({ type: 'datetime' })
     lastUpdated: Date;
 
-    // FIXED: Use datetime and make nullable
     @Column({ type: 'datetime', nullable: true })
     closedAt: Date | null;
 
@@ -244,4 +242,8 @@ export class RiskPosition {
 
     @Column({ type: 'text', nullable: true })
     closedReason: string | null;
+
+    // Add metadata column - REMOVE THE DUPLICATE DECLARATION BELOW
+    @Column({ type: 'text', nullable: true })
+    metadata: string | null; // This is the only metadata declaration needed
 }

@@ -24,11 +24,11 @@ const CONFIG = {
     slippageIncrement: 1.5,
     maxSlippage: 10,
     minContractBalance: '10',
-    maxTradeAmount: '0.04',
+    maxTradeAmount: '1000', // Increased to allow larger trades
     processingDelay: 5000,
     minTradeAmount: '0.001',
     graphqlEndpoint: 'http://localhost:4000/graphql',
-    databasePath: 'data/trigger-system.db',
+    databasePath: process.env.DATABASE_PATH || 'data/trigger-system.db',
     minStableLiquidity: '100',
     minVolatileLiquidity: '1',
     maxPriceImpact: '0.05'
@@ -46,7 +46,6 @@ const ERC20_ABI = [
 ];
 
 const EXCHANGE_ABI = require('../app/abis/Exchange.json');
-
 const TRADE_EXECUTOR_ABI = require('../app/abis/TradeExecutor.json');
 
 // ======================
@@ -112,7 +111,7 @@ async function logTradeToGraphQL(log: TradeExecutionLog) {
 async function initializeDatabase() {
     try {
         await AppDataSource.initialize();
-        logger.info('✅ Database connected');
+        logger.info(`✅ Database connected at ${CONFIG.databasePath}`);
     } catch (error) {
         logger.error('❌ Database initialization failed', error);
         process.exit(1);
@@ -121,7 +120,6 @@ async function initializeDatabase() {
 
 async function setupEnvironment() {
     try {
-
         // Normalize token addresses in config
         CONFIG.stableToken = ethers.utils.getAddress(CONFIG.stableToken);
         CONFIG.volatileToken = ethers.utils.getAddress(CONFIG.volatileToken);
@@ -158,7 +156,6 @@ async function setupEnvironment() {
 
         logger.info('✅ Environment setup complete');
     } catch (error) {
-        // Handle the outer error similarly
         let errorMessage = 'Unknown environment setup error';
         if (error instanceof Error) {
             errorMessage = error.message;
@@ -170,12 +167,14 @@ async function setupEnvironment() {
     }
 }
 
+// ======================
+// Updated ensureContractFunds()
+// ======================
 async function ensureContractFunds() {
     try {
         // Use auto-generated getters
         const stableAddress = await executorContract.getStableToken();
         const volatileAddress = await executorContract.getVolatileToken();
-        const exchangeAddress = await executorContract.getExchange();
 
         const stableToken = new ethers.Contract(
             stableAddress,
@@ -194,8 +193,9 @@ async function ensureContractFunds() {
             volatileToken.decimals()
         ]);
 
-        const minStable = ethers.utils.parseUnits(CONFIG.minContractBalance, stableDecimals);
-        const minVolatile = ethers.utils.parseUnits(CONFIG.minContractBalance, volatileDecimals);
+        // Increase min balance to accommodate larger trades
+        const minStable = ethers.utils.parseUnits('1000', stableDecimals);  // Increased to 1000
+        const minVolatile = ethers.utils.parseUnits('1000', volatileDecimals);  // Increased to 1000
 
         const [stableBalance, volatileBalance] = await Promise.all([
             stableToken.balanceOf(CONFIG.executorAddress),
@@ -205,6 +205,7 @@ async function ensureContractFunds() {
         logger.info(`Stable balance: ${ethers.utils.formatUnits(stableBalance, stableDecimals)}`);
         logger.info(`Volatile balance: ${ethers.utils.formatUnits(volatileBalance, volatileDecimals)}`);
 
+        // Transfer stable tokens if needed
         if (stableBalance.lt(minStable)) {
             const transferAmount = minStable.sub(stableBalance);
             logger.info(`⚡ Transferring ${ethers.utils.formatUnits(transferAmount, stableDecimals)} stable tokens`);
@@ -212,6 +213,7 @@ async function ensureContractFunds() {
             await tx.wait();
         }
 
+        // Transfer volatile tokens if needed
         if (volatileBalance.lt(minVolatile)) {
             const transferAmount = minVolatile.sub(volatileBalance);
             logger.info(`⚡ Transferring ${ethers.utils.formatUnits(transferAmount, volatileDecimals)} volatile tokens`);
@@ -468,7 +470,13 @@ async function executeTrade(
         throw new Error('Trade simulation failed after maximum attempts');
     }
 
-    logger.info(`🏁 Executing trade with slippage: ${slippage}%`);
+    logger.info(`🏁 Executing trade: ${decision.decision.toUpperCase()} | ` +
+                `Amount: ${decision.amount} | ` +
+                `Confidence: ${decision.confidence}`);
+    logger.info(`🛡️ Risk Parameters: ` +
+                `SL: ${decision.stopLoss?.toFixed(4) || 'N/A'} | ` +
+                `TP: ${decision.takeProfit?.toFixed(4) || 'N/A'}`);
+    
     const txResponse = await executorContract.executeTrade(
         buyVolatile,
         amountIn,
@@ -596,7 +604,9 @@ function createFallbackDecision(error: string): any {
         amount: '0',
         slippage: 0,
         reasoning: error || 'Fallback: Could not parse decision',
-        confidence: 'low'
+        confidence: 'low',
+        stopLoss: 0,
+        takeProfit: 0
     };
 }
 
@@ -625,7 +635,10 @@ async function processLogs() {
             .getMany();
 
         if (unprocessedLogs.length === 0) {
-            logger.info('⏭️ No new logs to process');
+            // Debug: Log database state
+            const totalLogs = await priceDetectionLogRepo.count();
+            const completedLogs = await priceDetectionLogRepo.count({ where: { status: 'completed' } });
+            logger.info(`⏭️ No new logs to process. Total logs: ${totalLogs}, Completed: ${completedLogs}`);
             return;
         }
 
@@ -655,6 +668,15 @@ async function processLogs() {
                     ? ethers.utils.getAddress(parsedDecision.tokenOut)
                     : '';
 
+                // Debug log the decision details
+                logger.debug(`Decision details: 
+                    Action: ${parsedDecision.decision}
+                    Amount: ${parsedDecision.amount}
+                    SL: ${parsedDecision.stopLoss}
+                    TP: ${parsedDecision.takeProfit}
+                    TokenIn: ${parsedDecision.tokenIn}
+                    TokenOut: ${parsedDecision.tokenOut}`);
+
                 const validationError = validateTradeDecision(parsedDecision);
                 logger.debug(`Decision validation result: ${validationError || 'valid'}`);
 
@@ -668,10 +690,15 @@ async function processLogs() {
                     decisionStatus = 'skipped';
                     logger.info(`⏭️ Holding for log ${log.id}`);
                 } else {
-                    logger.info(`🏁 Executing trade: ${parsedDecision.decision} ${parsedDecision.amount}`);
+                    logger.info(`🏁 Executing trade: ${parsedDecision.decision.toUpperCase()} | ` +
+                                `Amount: ${parsedDecision.amount} | ` +
+                                `Confidence: ${parsedDecision.confidence}`);
                     tradeResult = await executeTrade(parsedDecision, log.id);
                     decisionStatus = 'executed';
                     logger.info(`✅ Trade executed for log ${log.id}`);
+                    logger.info(`📊 Trade result: ` +
+                                `TX: ${tradeResult.txHash} | ` +
+                                `Actual Out: ${ethers.utils.formatUnits(tradeResult.actualAmountOut, tradeResult.tokenOutDecimals)}`);
                 }
             } catch (error: any) {
                 errorMessage = error.reason || error.message || JSON.stringify(error);
@@ -684,7 +711,8 @@ async function processLogs() {
 
             // Create trade execution log with TIMESTAMP FIX
             const tradeLog = new TradeExecutionLog();
-            tradeLog.timestamp = new Date().toISOString();  // FIX: Convert to ISO string format
+            tradeLog.createdAt = new Date().toISOString();  // FIX: Set createdAt field
+            tradeLog.timestamp = new Date().toISOString();
             tradeLog.id = `exec-${Date.now()}`;
             tradeLog.pairId = log.pairId;
             tradeLog.sourceLogId = log.id;
@@ -703,6 +731,8 @@ async function processLogs() {
             tradeLog.positionId = tradeResult?.positionId ?? null;
             tradeLog.entryPrice = tradeResult?.entryPrice || null;
             tradeLog.decision = JSON.stringify(decision);
+            tradeLog.stopLoss = decision.stopLoss || null;
+            tradeLog.takeProfit = decision.takeProfit || null;
 
             try {
                 await tradeExecutionLogRepo.save(tradeLog);
@@ -716,7 +746,6 @@ async function processLogs() {
                 }
             } catch (saveError) {
                 logger.error(`❌ Failed to save trade log: ${saveError}`);
-                // Add detailed error logging for debugging
                 if (saveError instanceof Error) {
                     logger.error(`Database error details: ${saveError.message}`);
                     if (saveError.stack) {
@@ -760,7 +789,6 @@ async function processLogs() {
         logger.info(`✅ Processed ${unprocessedLogs.length} logs`);
     } catch (error) {
         logger.error('❌❌❌ Log processing failed:', error);
-        // Add stack trace for main error
         if (error instanceof Error && error.stack) {
             logger.debug(error.stack);
         }
@@ -778,7 +806,7 @@ async function startHealthServer() {
         res.json({
             service: 'Trade Executor',
             version: '1.0',
-            routes: ['/health']
+            routes: ['/health', '/debug']
         });
     });
 
@@ -794,11 +822,37 @@ async function startHealthServer() {
         });
     });
 
+    healthApp.get('/debug', async (_, res) => {
+        try {
+            const logs = await AppDataSource.getRepository(PriceDetectionLog).find();
+            const tradeLogs = await AppDataSource.getRepository(TradeExecutionLog).find();
+            
+            res.json({
+                status: 'ok',
+                priceLogs: logs.map(log => ({
+                    id: log.id,
+                    status: log.status,
+                    decision: log.decision ? JSON.parse(log.decision).decision : null,
+                    amount: log.amount,
+                    stopLoss: log.stopLoss,
+                    takeProfit: log.takeProfit
+                })),
+                tradeLogs: tradeLogs.map(log => ({
+                    id: log.id,
+                    sourceLogId: log.sourceLogId,
+                    status: log.status,
+                    decision: log.decision ? JSON.parse(log.decision).decision : null
+                }))
+            });
+        } catch (error) {
+            res.status(500).json({ error: 'Database query failed' });
+        }
+    });
+
     const PORT = 3001;
     const server = healthApp.listen(PORT, () => {
         logger.info(`✅ Trade Executor health server running on port ${PORT}`);
     });
-
     return server;
 }
 

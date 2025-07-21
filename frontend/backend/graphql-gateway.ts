@@ -111,6 +111,7 @@ const typeDefs = `#graphql
     closedAt: String
     closedAmount: String
     closedReason: String
+    metadata: String  # ADDED METADATA FIELD
   }
 
   type ProcessedTrigger {
@@ -305,12 +306,20 @@ const resolvers = {
         }
       }
 
+      // Convert stopLoss and takeProfit to numbers
+      const stopLoss = typeof entry.stopLoss === 'string' ? 
+        parseFloat(entry.stopLoss) : entry.stopLoss;
+      const takeProfit = typeof entry.takeProfit === 'string' ? 
+        parseFloat(entry.takeProfit) : entry.takeProfit;
+
       Object.assign(log, {
         type: "price-detections",
         createdAt: new Date().toISOString(),
         decisionLength: entry.decision?.length || 0,
         bayesianAnalysis,
         regime: entry.regime || 'transitioning',
+        stopLoss,
+        takeProfit,
         ...entry
       });
 
@@ -465,6 +474,19 @@ async function startServer() {
     })
   );
 
+  // Enhanced positions endpoint
+  app.get('/positions', async (_, res) => {
+    try {
+      const positions = await AppDataSource.getRepository(RiskPosition).find();
+      res.json(positions.map(p => ({
+        ...p,
+        metadata: p.metadata ? JSON.parse(p.metadata) : {}
+      })));
+    } catch (error) {
+      res.status(500).json({ error: 'Database query failed' });
+    }
+  });
+
   // Error handling middleware
   app.use((
     err: any,
@@ -481,6 +503,7 @@ async function startServer() {
     console.log(`🌐 Gateway server running at http://localhost:${PORT}/graphql`);
     console.log(`🩺 Health check available at http://localhost:${PORT}/health`);
     console.log(`📚 GraphQL Playground: http://localhost:${PORT}/graphql`);
+    console.log(`📊 Positions API: http://localhost:${PORT}/positions`);
   });
 }
 

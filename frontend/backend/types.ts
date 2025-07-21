@@ -155,6 +155,7 @@ export interface RiskPosition {
     createdAt: string;
     lastUpdated: string;
     status: 'active' | 'closed' | 'liquidated';
+    metadata?: string;
 }
 
 export interface BayesianRegressionResult {

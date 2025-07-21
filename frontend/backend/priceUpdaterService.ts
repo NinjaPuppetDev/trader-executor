@@ -226,7 +226,7 @@ async function main() {
     // Keep process alive
     setInterval(() => {
         console.log('💤 Service is running...');
-    }, 15 * 60 * 1000); // 15 min heartbeat
+    }, 5 * 60 * 1000); // 15 min heartbeat
 }
 
 main().catch(console.error);

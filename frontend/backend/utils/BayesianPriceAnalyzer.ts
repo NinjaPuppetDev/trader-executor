@@ -1,622 +1,332 @@
-import { MarketDataState, MarketRegime, BayesianRegressionResult } from '../types';
+import { MarketDataState, BayesianRegressionResult, MarketRegime } from '../types';
 
-// Extended interface for enhanced results (backwards compatible)
-export interface EnhancedBayesianResult extends BayesianRegressionResult {
-    randomWalkBias?: number;
-    meanReversion?: number;
-    adaptiveVolatility?: number;
-    modelConfidence?: number;
-    alternativeScenarios?: {
-        bearish: { price: number; probability: number };
-        neutral: { price: number; probability: number };
-        bullish: { price: number; probability: number };
-    };
+export interface AnalyzerConfig {
+  minDataPoints?: number;
+  riskRewardRatio?: number;
+  supportResistanceLookback?: number;
+  volumeConfirmationThreshold?: number;
+  trendConfirmationThreshold?: number;
+  breakoutConfirmationThreshold?: number;
+  riskPercent?: number;
+  volumeSpeedThreshold?: number; // NEW
+
 }
 
 export class BayesianPriceAnalyzer {
-    private static readonly MIN_DATA_POINTS = 24;
-    private static readonly MAX_WINDOW_SIZE = 200;
-    private static readonly PREDICTION_HORIZON = 2;
-    private static readonly CONFIDENCE_LEVEL = 1.645; // 95% confidence
-    private static readonly MIN_RISK_REWARD = 1.5; // Minimum risk-reward ratio
-    private static readonly VOLATILITY_FLOOR_FACTOR = 0.001; // 0.1% of price
+  private static readonly defaultConfig: Required<AnalyzerConfig> = {
+    minDataPoints: 5,
+    riskRewardRatio: 2.0,
+    supportResistanceLookback: 20,
+    volumeConfirmationThreshold: 1.25,
+    trendConfirmationThreshold: 0.015,
+    breakoutConfirmationThreshold: 0.01,
+    riskPercent: 0.01,
+    volumeSpeedThreshold: 0.05, // ~5% average upward change default
 
-    // New constants for enhanced features
-    private static readonly RANDOM_WALK_WEIGHT = 0.3;
-    private static readonly MEAN_REVERSION_LOOKBACK = 50;
-    private static readonly VOLATILITY_DECAY = 0.94; // EWMA decay factor
-    private static readonly MODEL_ENSEMBLE_WEIGHTS = [0.4, 0.3, 0.3]; // [linear, random_walk, mean_reversion]
+  };
 
-    static analyze(data: MarketDataState): EnhancedBayesianResult {
-        const windowSize = this.calculateAdaptiveWindow(data);
+  static analyze(
+    data: MarketDataState,
+    config: AnalyzerConfig = {}
+  ): BayesianRegressionResult {
+    const cfg = { ...this.defaultConfig, ...config };
+    const { prices, currentPrice, volumes = [] } = data;
 
-        if (data.prices.length < windowSize) {
-            return this.insufficientDataFallback(data.currentPrice);
+    if (prices.length < cfg.minDataPoints) {
+      return this.neutralResult(currentPrice, cfg.riskRewardRatio);
+    }
+
+    const { support, resistance } = this.findSupportResistance(
+      prices, 
+      cfg.supportResistanceLookback
+    );
+    
+    const priceSpeed = this.calculatePriceSpeed(prices);
+    const volumeConfirmed = volumes.length > 0 
+      ? this.checkVolumeConfirmation(volumes, cfg.volumeConfirmationThreshold)
+      : false;
+
+    const { trendDirection, prediction } = this.assessPricePosition(
+      currentPrice,
+      support,
+      resistance,
+      priceSpeed,
+      volumeConfirmed,
+      cfg.trendConfirmationThreshold,
+      cfg.breakoutConfirmationThreshold
+    );
+
+    const { stopLoss, takeProfit } = this.priceActionRiskLevels(
+      currentPrice,
+      support,
+      resistance,
+      trendDirection,
+      cfg.riskRewardRatio,
+      cfg.riskPercent
+    );
+
+    const confidence = this.calculatePositionConfidence(
+      currentPrice, 
+      support, 
+      resistance,
+      volumeConfirmed
+    );
+
+    return {
+      predictedPrice: prediction,
+      confidenceInterval: [support, resistance],
+      stopLoss,
+      takeProfit,
+      trendDirection,
+      volatility: (resistance - support) / currentPrice,
+      variance: 0,
+      probability: confidence,
+      zScore: 0,
+      regime: this.determineMarketRegime(support, resistance, currentPrice)
+    };
+  }
+
+  private static assessPricePosition(
+    currentPrice: number,
+    support: number,
+    resistance: number,
+    priceSpeed: number,
+    volumeConfirmed: boolean,
+    trendThreshold: number,
+    breakoutThreshold: number
+  ): { trendDirection: 'bullish' | 'bearish' | 'neutral'; prediction: number } {
+    const range = resistance - support;
+    const position = (currentPrice - support) / range;
+    
+    // Breakout detection
+    if (currentPrice > resistance * (1 + breakoutThreshold) && volumeConfirmed) {
+      return { trendDirection: 'bullish', prediction: currentPrice + range * 0.5 };
+    }
+    if (currentPrice < support * (1 - breakoutThreshold) && volumeConfirmed) {
+      return { trendDirection: 'bearish', prediction: currentPrice - range * 0.5 };
+    }
+    
+    // Trend detection
+    const bullishSpeed = priceSpeed > trendThreshold;
+    const bearishSpeed = priceSpeed < -trendThreshold;
+    
+    if (position > 0.6 && bullishSpeed) {
+      return { trendDirection: 'bullish', prediction: resistance };
+    }
+    if (position < 0.4 && bearishSpeed) {
+      return { trendDirection: 'bearish', prediction: support };
+    }
+    
+    // Mean reversion
+    if (position > 0.7) {
+      return { trendDirection: 'bearish', prediction: support + range * 0.3 };
+    }
+    if (position < 0.3) {
+      return { trendDirection: 'bullish', prediction: resistance - range * 0.3 };
+    }
+    
+    return { trendDirection: 'neutral', prediction: currentPrice };
+  }
+
+  private static priceActionRiskLevels(
+    currentPrice: number,
+    support: number,
+    resistance: number,
+    trendDirection: 'bullish' | 'bearish' | 'neutral',
+    riskReward: number,
+    riskPercent: number
+  ) {
+    const range = resistance - support;
+    const riskDistance = currentPrice * riskPercent;
+    
+    let stopLoss: number, takeProfit: number;
+    
+    if (trendDirection === 'bullish') {
+      stopLoss = support - (range * 0.01);
+      takeProfit = resistance + (riskDistance * riskReward);
+    } 
+    else if (trendDirection === 'bearish') {
+      stopLoss = resistance + (range * 0.01);
+      takeProfit = support - (riskDistance * riskReward);
+    } 
+    else {
+      stopLoss = currentPrice - riskDistance;
+      takeProfit = currentPrice + riskDistance;
+    }
+    
+    // Ensure logical values
+    if (trendDirection === 'bullish') {
+      stopLoss = Math.min(stopLoss, currentPrice - riskDistance);
+    } else if (trendDirection === 'bearish') {
+      stopLoss = Math.max(stopLoss, currentPrice + riskDistance);
+    }
+    
+    return { stopLoss, takeProfit };
+  }
+
+  private static findSupportResistance(
+    prices: number[], 
+    lookback: number
+  ): { support: number; resistance: number } {
+    const recentPrices = prices.slice(-lookback);
+    if (!recentPrices.length) {
+      const lastPrice = prices[prices.length - 1] || 1;
+      return { support: lastPrice, resistance: lastPrice };
+    }
+
+    const range = Math.max(1, Math.max(...recentPrices) - Math.min(...recentPrices));
+    const gridSize = range / 20;
+    const clusters = new Map<number, number>();
+    
+    recentPrices.forEach(price => {
+      const level = Math.round(price / gridSize) * gridSize;
+      clusters.set(level, (clusters.get(level) || 0) + 1);
+    });
+
+    const currentPrice = recentPrices[recentPrices.length - 1];
+    const minPrice = Math.min(...recentPrices);
+    const maxPrice = Math.max(...recentPrices);
+    
+    let support = minPrice;
+    let maxSupportCount = 0;
+    let resistance = maxPrice;
+    let maxResistanceCount = 0;
+    
+    clusters.forEach((count, level) => {
+      // Support detection (lower 30% of range)
+      if (level >= minPrice && level <= minPrice + (maxPrice - minPrice) * 0.3) {
+        if (count > maxSupportCount) {
+          support = level;
+          maxSupportCount = count;
         }
-
-        const prices = data.prices.slice(-windowSize);
-        const timeIndexes = Array.from({ length: prices.length }, (_, i) => i);
-        const currentPrice = data.currentPrice;
-
-        // Enhanced ensemble modeling
-        const models = this.calculateEnsembleModels(prices, timeIndexes, currentPrice);
-
-        // Bayesian regression with numerical stability (original method)
-        const { slope, intercept, variance, slopeStdError } = this.bayesianRegression(
-            timeIndexes,
-            prices
-        );
-
-        // Enhanced prediction with model ensemble
-        const predictionIndex = timeIndexes.length + this.PREDICTION_HORIZON;
-        const ensemblePrediction = this.combineModelPredictions(models, predictionIndex);
-        const predictedPrice = ensemblePrediction.price;
-
-        // Enhanced volatility estimation
-        const adaptiveVolatility = this.calculateAdaptiveVolatility(prices);
-        const stdDev = Math.max(Math.sqrt(variance), adaptiveVolatility);
-
-        // Enhanced confidence interval with model uncertainty
-        const meanX = timeIndexes.reduce((sum, t) => sum + t, 0) / timeIndexes.length;
-        const sumSquaredDev = timeIndexes.reduce((sum, t) => sum + Math.pow(t - meanX, 2), 0);
-        const denominator = Math.max(1e-8, sumSquaredDev);
-
-        const baseVariance = variance * (1 + 1 / timeIndexes.length +
-            Math.pow(predictionIndex - meanX, 2) / denominator);
-
-        // Add model uncertainty to prediction variance
-        const modelUncertainty = ensemblePrediction.uncertainty;
-        const totalVariance = baseVariance + modelUncertainty;
-        const predictionStdDev = Math.sqrt(totalVariance);
-
-        const confidenceInterval: [number, number] = [
-            predictedPrice - this.CONFIDENCE_LEVEL * predictionStdDev,
-            predictedPrice + this.CONFIDENCE_LEVEL * predictionStdDev
-        ];
-
-        // Enhanced probability calculation
-        const zScore = (currentPrice - predictedPrice) / predictionStdDev;
-        const absZ = Math.abs(zScore);
-        const pValue = 2 * (1 - this.standardNormalCDF(absZ));
-        const probability = 1 - pValue;
-
-        // Enhanced trend detection
-        const trendDirection = this.determineTrend(
-            slope,
-            slopeStdError,
-            currentPrice,
-            confidenceInterval,
-            models.randomWalk.bias // Enhanced with random walk bias
-        );
-
-        // Apply volatility floor to prevent microscopic distances
-        const effectiveVolatility = Math.max(
-            stdDev,
-            currentPrice * this.VOLATILITY_FLOOR_FACTOR
-        );
-
-        // Enhanced risk management
-        const { stopLoss, takeProfit } = this.calculateEnhancedRiskParameters(
-            currentPrice,
-            trendDirection,
-            confidenceInterval,
-            effectiveVolatility,
-            probability,
-            models
-        );
-
-        const regime = this.detectMarketRegime(stdDev, probability, zScore, models);
-
-        // Generate alternative scenarios
-        const alternativeScenarios = this.generateAlternativeScenarios(
-            currentPrice,
-            models,
-            effectiveVolatility
-        );
-
-        return {
-            // Original interface (backwards compatible)
-            predictedPrice,
-            confidenceInterval,
-            stopLoss,
-            takeProfit,
-            trendDirection,
-            volatility: stdDev,
-            variance,
-            probability,
-            zScore,
-            regime,
-
-            // Enhanced features
-            randomWalkBias: models.randomWalk.bias,
-            meanReversion: models.meanReversion.strength,
-            adaptiveVolatility,
-            modelConfidence: ensemblePrediction.confidence,
-            alternativeScenarios
-        };
-    }
-
-    private static calculateEnsembleModels(prices: number[], timeIndexes: number[], currentPrice: number) {
-        return {
-            linear: this.calculateLinearModel(timeIndexes, prices),
-            randomWalk: this.calculateRandomWalkModel(prices, currentPrice),
-            meanReversion: this.calculateMeanReversionModel(prices, currentPrice)
-        };
-    }
-
-    private static calculateLinearModel(timeIndexes: number[], prices: number[]) {
-        const regression = this.bayesianRegression(timeIndexes, prices);
-        return {
-            slope: regression.slope,
-            intercept: regression.intercept,
-            variance: regression.variance,
-            predict: (t: number) => regression.intercept + regression.slope * t
-        };
-    }
-
-    private static calculateRandomWalkModel(prices: number[], currentPrice: number) {
-        const returns = [];
-        for (let i = 1; i < prices.length; i++) {
-            returns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
+      }
+      
+      // Resistance detection (upper 30% of range)
+      if (level >= maxPrice - (maxPrice - minPrice) * 0.3 && level <= maxPrice) {
+        if (count > maxResistanceCount) {
+          resistance = level;
+          maxResistanceCount = count;
         }
+      }
+    });
 
-        // Calculate drift (bias) and volatility
-        const drift = returns.reduce((sum, r) => sum + r, 0) / returns.length;
-        const variance = returns.reduce((sum, r) => sum + Math.pow(r - drift, 2), 0) / (returns.length - 1);
+    return { support, resistance };
+  }
 
-        // Detect momentum vs mean reversion bias
-        const recentReturns = returns.slice(-10);
-        const momentumBias = recentReturns.reduce((sum, r, i) => {
-            if (i > 0) {
-                return sum + (r * recentReturns[i - 1] > 0 ? 1 : -1);
-            }
-            return sum;
-        }, 0) / (recentReturns.length - 1);
-
-        return {
-            drift,
-            variance,
-            bias: momentumBias * Math.abs(drift),
-            predict: (steps: number) => {
-                // Geometric Brownian Motion prediction
-                const dt = 1; // time step
-                const expectedReturn = drift * steps * dt;
-                const randomComponent = Math.sqrt(variance * steps * dt);
-                return currentPrice * Math.exp(expectedReturn + 0.5 * randomComponent);
-            }
-        };
+  private static calculatePriceSpeed(prices: number[]): number {
+    if (prices.length < 3) return 0;
+    
+    const recent = prices.slice(-5);
+    const weights = [0.1, 0.15, 0.25, 0.3, 0.4].slice(0, recent.length - 1);
+    let totalWeight = 0;
+    let weightedChange = 0;
+    
+    for (let i = 1; i < recent.length; i++) {
+      const change = (recent[i] - recent[i-1]) / recent[i-1];
+      weightedChange += change * weights[i-1];
+      totalWeight += weights[i-1];
     }
+    
+    return weightedChange / totalWeight;
+  }
 
-    private static calculateMeanReversionModel(prices: number[], currentPrice: number) {
-        const lookback = Math.min(this.MEAN_REVERSION_LOOKBACK, prices.length);
-        const recentPrices = prices.slice(-lookback);
-
-        // Calculate long-term mean and current deviation
-        const longTermMean = recentPrices.reduce((sum, p) => sum + p, 0) / recentPrices.length;
-        const deviation = currentPrice - longTermMean;
-
-        // Estimate mean reversion strength using half-life
-        const halfLife = this.estimateHalfLife(recentPrices);
-        const reversionRate = Math.log(2) / Math.max(halfLife, 1);
-
-        return {
-            mean: longTermMean,
-            deviation,
-            strength: reversionRate,
-            predict: (steps: number) => {
-                // Mean reversion prediction: P(t) = mean + (P(0) - mean) * exp(-k*t)
-                const decayFactor = Math.exp(-reversionRate * steps);
-                return longTermMean + deviation * decayFactor;
-            }
-        };
+  private static checkVolumeConfirmation(
+    volumes: number[],
+    magnitudeThreshold: number,
+    speedThreshold?: number // optional
+  ): boolean {
+    if (volumes.length < 5) return false;
+  
+    const currentVolume = volumes[volumes.length - 1];
+    const avgVolume = volumes.slice(-5).reduce((sum, v) => sum + v, 0) / 5;
+    const basicConfirmed = currentVolume > avgVolume * magnitudeThreshold;
+  
+    if (speedThreshold === undefined) {
+      return basicConfirmed;
     }
+  
+    const speed = this.calculateVolumeSpeed(volumes);
+    const speedConfirmed = speed > speedThreshold;
+  
+    return basicConfirmed && speedConfirmed;
+  }
+  
 
-    private static estimateHalfLife(prices: number[]): number {
-        if (prices.length < 3) return 10; // Default half-life
-
-        const changes = [];
-        for (let i = 1; i < prices.length; i++) {
-            changes.push(prices[i] - prices[i - 1]);
-        }
-
-        // Simple autocorrelation at lag 1
-        const mean = changes.reduce((sum, c) => sum + c, 0) / changes.length;
-        let autoCorr = 0;
-        let variance = 0;
-
-        for (let i = 1; i < changes.length; i++) {
-            autoCorr += (changes[i] - mean) * (changes[i - 1] - mean);
-            variance += Math.pow(changes[i] - mean, 2);
-        }
-
-        autoCorr /= (changes.length - 1);
-        variance /= (changes.length - 1);
-
-        const correlation = variance > 0 ? autoCorr / variance : 0;
-        return correlation > 0 ? -1 / Math.log(Math.abs(correlation)) : 10;
+  private static calculateVolumeSpeed(volumes: number[]): number {
+    if (volumes.length < 3) return 0;
+  
+    const recent = volumes.slice(-5);
+    let deltaSum = 0;
+  
+    for (let i = 1; i < recent.length; i++) {
+      const prev = recent[i - 1];
+      const curr = recent[i];
+      if (prev > 0) {
+        deltaSum += (curr - prev) / prev;
+      }
     }
+  
+    return deltaSum / (recent.length - 1);
+  }
+  
 
-    private static combineModelPredictions(models: any, predictionIndex: number) {
-        const predictions = [
-            models.linear.predict(predictionIndex),
-            models.randomWalk.predict(this.PREDICTION_HORIZON),
-            models.meanReversion.predict(this.PREDICTION_HORIZON)
-        ];
-
-        // Weighted ensemble prediction
-        const weightedPrice = predictions.reduce((sum, pred, i) =>
-            sum + pred * this.MODEL_ENSEMBLE_WEIGHTS[i], 0);
-
-        // Calculate prediction uncertainty (variance across models)
-        const meanPrediction = predictions.reduce((sum, pred) => sum + pred, 0) / predictions.length;
-        const modelVariance = predictions.reduce((sum, pred) =>
-            sum + Math.pow(pred - meanPrediction, 2), 0) / predictions.length;
-
-        // Model confidence based on agreement
-        const maxDeviation = Math.max(...predictions.map(p => Math.abs(p - meanPrediction)));
-        const confidence = 1 / (1 + maxDeviation / meanPrediction);
-
-        return {
-            price: weightedPrice,
-            uncertainty: modelVariance,
-            confidence: Math.max(0.1, Math.min(0.9, confidence))
-        };
+  private static calculatePositionConfidence(
+    currentPrice: number,
+    support: number,
+    resistance: number,
+    volumeConfirmed: boolean
+  ): number {
+    const range = resistance - support;
+    if (range <= 0) return 0.5;
+    
+    const position = (currentPrice - support) / range;
+    let confidence = 0.6;
+    
+    // Increase confidence at range extremes
+    if (position < 0.15 || position > 0.85) {
+      confidence = 0.75;
     }
-
-    private static calculateAdaptiveVolatility(prices: number[]): number {
-        if (prices.length < 2) return 0;
-
-        // EWMA volatility calculation
-        const returns = [];
-        for (let i = 1; i < prices.length; i++) {
-            returns.push(Math.log(prices[i] / prices[i - 1]));
-        }
-
-        let ewmaVariance = Math.pow(returns[0], 2);
-        for (let i = 1; i < returns.length; i++) {
-            ewmaVariance = this.VOLATILITY_DECAY * ewmaVariance +
-                (1 - this.VOLATILITY_DECAY) * Math.pow(returns[i], 2);
-        }
-
-        return Math.sqrt(ewmaVariance) * prices[prices.length - 1];
+    
+    // Boost confidence with volume confirmation
+    if (volumeConfirmed) {
+      confidence = Math.min(0.9, confidence + 0.15);
     }
+    
+    return confidence;
+  }
 
-    private static generateAlternativeScenarios(currentPrice: number, models: any, volatility: number) {
-        const scenarios = ['bearish', 'neutral', 'bullish'];
-        const multipliers = [-1.5, 0, 1.5];
-
-        return scenarios.reduce((acc, scenario, i) => {
-            const adjustment = multipliers[i] * volatility;
-            const scenarioPrice = currentPrice + adjustment;
-
-            // Calculate probability based on model ensemble
-            const linearProb = this.calculateScenarioProbability(models.linear, scenarioPrice, currentPrice);
-            const randomWalkProb = this.calculateScenarioProbability(models.randomWalk, scenarioPrice, currentPrice);
-            const meanReversionProb = this.calculateScenarioProbability(models.meanReversion, scenarioPrice, currentPrice);
-
-            const weightedProb = linearProb * this.MODEL_ENSEMBLE_WEIGHTS[0] +
-                randomWalkProb * this.MODEL_ENSEMBLE_WEIGHTS[1] +
-                meanReversionProb * this.MODEL_ENSEMBLE_WEIGHTS[2];
-
-            acc[scenario] = {
-                price: scenarioPrice,
-                probability: Math.max(0.1, Math.min(0.9, weightedProb))
-            };
-
-            return acc;
-        }, {} as any);
+  private static determineMarketRegime(
+    support: number,
+    resistance: number,
+    currentPrice: number
+  ): MarketRegime {
+    const range = resistance - support;
+    const rangePercentage = range / currentPrice;
+    
+    if (rangePercentage < 0.02) {
+      return 'consolidating';
     }
+    
+    return currentPrice > resistance || currentPrice < support
+      ? 'trending'
+      : 'transitioning';
+  }
 
-    private static calculateScenarioProbability(model: any, scenarioPrice: number, currentPrice: number): number {
-        // Simplified probability calculation - can be enhanced with proper statistical methods
-        const expectedPrice = model.predict ? model.predict(this.PREDICTION_HORIZON) : currentPrice;
-        const distance = Math.abs(scenarioPrice - expectedPrice);
-        const variance = model.variance || Math.pow(currentPrice * 0.01, 2);
-
-        // Gaussian probability approximation
-        return Math.exp(-Math.pow(distance, 2) / (2 * variance));
-    }
-
-    // Enhanced versions of existing methods
-    private static detectMarketRegime(
-        volatility: number,
-        probability: number,
-        zScore: number,
-        models: any
-    ): MarketRegime {
-        const trendStrength = Math.abs(models.linear.slope || 0);
-        const meanReversionStrength = models.meanReversion.strength || 0;
-        const randomWalkBias = Math.abs(models.randomWalk.bias || 0);
-
-        // Enhanced regime detection with multiple factors
-        if (volatility > 0.04 && probability > 0.7 && trendStrength > 0.5)
-            return 'trending';
-        if (volatility < 0.01 && Math.abs(zScore) < 0.4 && meanReversionStrength > 0.1)
-            return 'consolidating';
-        if (volatility > 0.06 || randomWalkBias > 0.3)
-            return 'volatile';
-        return 'transitioning';
-    }
-
-    private static determineTrend(
-        slope: number,
-        slopeStdError: number,
-        currentPrice: number,
-        confidenceInterval: [number, number],
-        randomWalkBias: number = 0
-    ): 'bullish' | 'bearish' | 'neutral' {
-        // Statistical significance test (original)
-        const tValue = slopeStdError > 0 ? Math.abs(slope) / slopeStdError : 0;
-        if (tValue < 1.96) return 'neutral';
-
-        // Enhanced with random walk bias
-        const combinedSignal = slope + randomWalkBias * this.RANDOM_WALK_WEIGHT;
-
-        // Bayesian confirmation with enhanced signal
-        if (combinedSignal > 0) {
-            return currentPrice > confidenceInterval[0] ? 'bullish' : 'neutral';
-        } else {
-            return currentPrice < confidenceInterval[1] ? 'bearish' : 'neutral';
-        }
-    }
-
-    private static calculateEnhancedRiskParameters(
-        currentPrice: number,
-        trendDirection: 'bullish' | 'bearish' | 'neutral',
-        confidenceInterval: [number, number],
-        volatility: number,
-        probability: number,
-        models: any
-    ): { stopLoss: number; takeProfit: number } {
-        // Get original risk parameters
-        const originalRisk = this.calculateRiskParameters(
-            currentPrice,
-            trendDirection,
-            confidenceInterval,
-            volatility,
-            probability
-        );
-
-        // Enhanced with model-specific adjustments
-        const meanReversionAdjustment = models.meanReversion.strength * 0.5;
-        const randomWalkAdjustment = Math.abs(models.randomWalk.bias) * 0.3;
-
-        let { stopLoss, takeProfit } = originalRisk;
-
-        // Adjust based on mean reversion (tighter stops, closer targets)
-        if (meanReversionAdjustment > 0.1) {
-            const adjustment = volatility * meanReversionAdjustment;
-            if (trendDirection === 'bullish') {
-                stopLoss = Math.max(stopLoss, currentPrice - adjustment);
-                takeProfit = Math.min(takeProfit, currentPrice + adjustment);
-            } else if (trendDirection === 'bearish') {
-                stopLoss = Math.min(stopLoss, currentPrice + adjustment);
-                takeProfit = Math.max(takeProfit, currentPrice - adjustment);
-            }
-        }
-
-        // Adjust based on random walk bias (wider stops for strong bias)
-        if (randomWalkAdjustment > 0.2) {
-            const adjustment = volatility * randomWalkAdjustment;
-            if (trendDirection === 'bullish') {
-                stopLoss = Math.min(stopLoss, currentPrice - adjustment);
-                takeProfit = Math.max(takeProfit, currentPrice + adjustment);
-            } else if (trendDirection === 'bearish') {
-                stopLoss = Math.max(stopLoss, currentPrice + adjustment);
-                takeProfit = Math.min(takeProfit, currentPrice - adjustment);
-            }
-        }
-
-        return { stopLoss, takeProfit };
-    }
-
-    // Original methods remain unchanged for backwards compatibility
-    private static calculateAdaptiveWindow(data: MarketDataState): number {
-        if (data.prices.length < this.MIN_DATA_POINTS)
-            return this.MIN_DATA_POINTS;
-
-        const recentPrices = data.prices.slice(-this.MIN_DATA_POINTS);
-        let volatility = 0;
-
-        for (let i = 1; i < recentPrices.length; i++) {
-            volatility += Math.abs(recentPrices[i] - recentPrices[i - 1]);
-        }
-
-        volatility /= recentPrices.length;
-        const normalizedVol = Math.min(0.5, volatility / recentPrices[0]);
-
-        return Math.min(
-            this.MAX_WINDOW_SIZE,
-            Math.max(
-                this.MIN_DATA_POINTS,
-                Math.floor(
-                    this.MIN_DATA_POINTS +
-                    (this.MAX_WINDOW_SIZE - this.MIN_DATA_POINTS) *
-                    (1 - Math.min(normalizedVol * 100, 0.8))
-                )
-            )
-        );
-    }
-
-    private static bayesianRegression(
-        x: number[],
-        y: number[]
-    ): { slope: number; intercept: number; variance: number; slopeStdError: number } {
-        const n = x.length;
-        const xSum = x.reduce((sum, val) => sum + val, 0);
-        const ySum = y.reduce((sum, val) => sum + val, 0);
-        const xySum = x.reduce((sum, val, i) => sum + val * y[i], 0);
-        const xSquaredSum = x.reduce((sum, val) => sum + val * val, 0);
-
-        const denominator = n * xSquaredSum - xSum * xSum;
-        if (Math.abs(denominator) < 1e-8) {
-            return {
-                slope: 0,
-                intercept: ySum / n,
-                variance: 0,
-                slopeStdError: 0
-            };
-        }
-
-        const slope = (n * xySum - xSum * ySum) / denominator;
-        const intercept = (ySum - slope * xSum) / n;
-
-        const residuals = y.map((val, i) => val - (intercept + slope * x[i]));
-        const residualSumSquares = residuals.reduce((sum, res) => sum + res * res, 0);
-        const variance = residualSumSquares / Math.max(1, n - 2);
-
-        const xMean = xSum / n;
-        const xVariance = Math.max(1e-8, xSquaredSum / n - xMean * xMean);
-        const slopeStdError = Math.sqrt(Math.max(0, variance) / (n * xVariance));
-
-        return { slope, intercept, variance, slopeStdError };
-    }
-
-    private static calculateRiskParameters(
-        currentPrice: number,
-        trendDirection: 'bullish' | 'bearish' | 'neutral',
-        confidenceInterval: [number, number],
-        volatility: number,
-        probability: number
-    ): { stopLoss: number; takeProfit: number } {
-        const riskMultiplier = Math.min(3, 1 + (1 - probability) * 2);
-        const [lowerBound, upperBound] = confidenceInterval;
-
-        const minRange = volatility * 3;
-        const priceRange = Math.max(upperBound - lowerBound, minRange);
-        const minProfitDistance = volatility * this.MIN_RISK_REWARD * riskMultiplier;
-
-        switch (trendDirection) {
-            case 'bullish': {
-                const stopLoss = Math.min(
-                    lowerBound - volatility * riskMultiplier,
-                    currentPrice - Math.max(volatility * 2, priceRange * 0.3)
-                );
-
-                const takeProfit = currentPrice + Math.max(
-                    minProfitDistance,
-                    volatility * 3,
-                    (upperBound - currentPrice) * 1.2
-                );
-
-                return this.validateRiskLevels(
-                    stopLoss,
-                    takeProfit,
-                    currentPrice,
-                    volatility,
-                    'bullish'
-                );
-            }
-
-            case 'bearish': {
-                const stopLoss = Math.max(
-                    upperBound + volatility * riskMultiplier,
-                    currentPrice + Math.max(volatility * 2, priceRange * 0.3)
-                );
-
-                const takeProfit = currentPrice - Math.max(
-                    minProfitDistance,
-                    volatility * 3,
-                    (currentPrice - lowerBound) * 1.2
-                );
-
-                return this.validateRiskLevels(
-                    stopLoss,
-                    takeProfit,
-                    currentPrice,
-                    volatility,
-                    'bearish'
-                );
-            }
-
-            default:
-                return {
-                    stopLoss: currentPrice - volatility * 2.5,
-                    takeProfit: currentPrice + volatility * 2.5
-                };
-        }
-    }
-
-    private static validateRiskLevels(
-        stopLoss: number,
-        takeProfit: number,
-        currentPrice: number,
-        volatility: number,
-        direction: 'bullish' | 'bearish'
-    ) {
-        const validBull = direction === 'bullish' &&
-            stopLoss < currentPrice &&
-            takeProfit > currentPrice;
-
-        const validBear = direction === 'bearish' &&
-            stopLoss > currentPrice &&
-            takeProfit < currentPrice;
-
-        if (validBull || validBear) {
-            return { stopLoss, takeProfit };
-        }
-
-        return direction === 'bullish'
-            ? {
-                stopLoss: currentPrice - volatility * 2,
-                takeProfit: currentPrice + volatility * 3
-            }
-            : {
-                stopLoss: currentPrice + volatility * 2,
-                takeProfit: currentPrice - volatility * 3
-            };
-    }
-
-    private static standardNormalCDF(x: number): number {
-        const absX = Math.abs(x);
-        const t = 1 / (1 + 0.5 * absX);
-
-        const exponent = -absX * absX - 1.26551223 + t * (
-            1.00002368 + t * (
-                0.37409196 + t * (
-                    0.09678418 + t * (
-                        -0.18628806 + t * (
-                            0.27886807 + t * (
-                                -1.13520398 + t * (
-                                    1.48851587 + t * (
-                                        -0.82215223 + t * 0.17087277
-                                    )
-                                )
-                            )
-                        )
-                    )
-                )
-            )
-        );
-
-        const tau = t * Math.exp(exponent);
-        return x >= 0 ? 1 - tau : tau;
-    }
-
-    private static insufficientDataFallback(currentPrice: number): EnhancedBayesianResult {
-        const volatility = currentPrice * 0.005;
-        return {
-            predictedPrice: currentPrice,
-            confidenceInterval: [currentPrice - volatility, currentPrice + volatility],
-            stopLoss: currentPrice - volatility * 2,
-            takeProfit: currentPrice + volatility * 2,
-            trendDirection: 'neutral',
-            variance: Math.pow(volatility, 2),
-            volatility,
-            probability: 0.5,
-            zScore: 0,
-            regime: 'transitioning',
-
-            // Enhanced fallback values
-            randomWalkBias: 0,
-            meanReversion: 0,
-            adaptiveVolatility: volatility,
-            modelConfidence: 0.5,
-            alternativeScenarios: {
-                bearish: { price: currentPrice - volatility, probability: 0.33 },
-                neutral: { price: currentPrice, probability: 0.34 },
-                bullish: { price: currentPrice + volatility, probability: 0.33 }
-            }
-        };
-    }
+  private static neutralResult(
+    currentPrice: number, 
+    riskReward: number
+  ): BayesianRegressionResult {
+    return {
+      predictedPrice: currentPrice,
+      confidenceInterval: [currentPrice * 0.98, currentPrice * 1.02],
+      stopLoss: currentPrice * 0.98,
+      takeProfit: currentPrice * 1.02 * riskReward,
+      trendDirection: 'neutral',
+      volatility: 0.02,
+      variance: 0,
+      probability: 0.5,
+      zScore: 0,
+      regime: 'consolidating'
+    };
+  }
 }
