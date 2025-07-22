@@ -14,14 +14,14 @@ export interface AnalyzerConfig {
 
 export class BayesianPriceAnalyzer {
   private static readonly defaultConfig: Required<AnalyzerConfig> = {
-    minDataPoints: 5,
-    riskRewardRatio: 2.0,
-    supportResistanceLookback: 20,
-    volumeConfirmationThreshold: 1.25,
-    trendConfirmationThreshold: 0.015,
-    breakoutConfirmationThreshold: 0.01,
-    riskPercent: 0.01,
-    volumeSpeedThreshold: 0.05, // ~5% average upward change default
+      minDataPoints: 8,  // Increased from 5
+      riskRewardRatio: 1.8,  // Slightly more aggressive
+      supportResistanceLookback: 80,  // Shorter lookback for faster adaptation
+      volumeConfirmationThreshold: 1.15,  // Lower threshold for volume confirmation
+      trendConfirmationThreshold: 0.008,  // More sensitive to trends
+      breakoutConfirmationThreshold: 0.007,  // Smaller breakout detectison
+      riskPercent: 0.015,  // Slightly higher risk tolerance
+      volumeSpeedThreshold: 0.03  // Lower volume speed requirement
 
   };
 

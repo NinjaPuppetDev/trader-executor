@@ -58,6 +58,11 @@ make run-trainer
 
 make run-price-updater 
 
+cd frontend && npx ts-node --project tsconfig.backend.json backend/fundingRateAnalyzer.ts
+
+cd frontend && npx ts-node --project tsconfig.backend.json backend/ethGasAnalyzer.ts
+
+
 # -- Development Tools --
 
 make deploy-frontend

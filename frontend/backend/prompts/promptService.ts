@@ -1,5 +1,7 @@
+// Updated promptService.ts
 import { MarketDataCollector } from "../utils/marketDataCollector";
-import { BayesianPriceAnalyzer } from "../utils/BayesianPriceAnalyzer";
+import { BayesianPriceAnalyzer } from "../utils/bayesianPriceAnalyzer";
+import { FundingRateAnalyzer } from "../fundingRateAnalyzer"; // Add import
 import { MarketDataState, BayesianRegressionResult, MarketRegime } from "../types";
 
 function renderTemplate<T extends Record<string, unknown>>(template: string, data: T): string {
@@ -19,7 +21,8 @@ export class PromptService {
 
   constructor(
     private marketDataCollector: MarketDataCollector,
-    private symbol: string = 'ethusdt'
+    private symbol: string = 'ethusdt',
+    private fundingRateAnalyzer?: FundingRateAnalyzer // Add optional parameter
   ) {}
 
   private getMarketState(): MarketDataState {
@@ -44,6 +47,12 @@ export class PromptService {
   generatePromptConfig(): { config: any; bayesianAnalysis: BayesianRegressionResult } {
     const state = this.getMarketState();
     const analysis = BayesianPriceAnalyzer.analyze(state);
+    
+    // Get funding rate sentiment if available
+    const fundingSentiment = this.fundingRateAnalyzer?.getCurrentSentiment();
+    const fundingStr = fundingSentiment 
+      ? `${fundingSentiment.overallSentiment} (Score: ${fundingSentiment.score.toFixed(3)})`
+      : 'Not available';
 
     const templateData = {
       symbol: state.symbol.toUpperCase(),
@@ -52,7 +61,8 @@ export class PromptService {
       volatilityPercent: (analysis.volatility * 100).toFixed(2),
       regime: analysis.regime.toUpperCase(),
       stopLoss: analysis.stopLoss.toFixed(4),
-      takeProfit: analysis.takeProfit.toFixed(4)
+      takeProfit: analysis.takeProfit.toFixed(4),
+      fundingSentiment: fundingStr // Add to template
     };
 
     const sysTemplate = [
@@ -62,6 +72,7 @@ export class PromptService {
         'Predicted Price: {{predictedPrice}}',
         'Volatility: {{volatilityPercent}}%',
         'Market Regime: {{regime}}',
+        'Funding Rate Sentiment: {{fundingSentiment}}', // New line
         '',
         'KEY LEVELS:',
         `Stop Loss: {{stopLoss}}`,
@@ -115,6 +126,8 @@ export class PromptService {
 
     const trend = analysis.trendDirection as Trend;
     const icon = this.ICONS[trend];
+    
+    // Add funding rate interpretation to rules
     const instructions = `CURRENT MARKET ANALYSIS:
     - Trend: ${trend.toUpperCase()} ${icon}
     - Confidence: ${(analysis.probability * 100).toFixed(1)}%
@@ -130,19 +143,26 @@ export class PromptService {
     3. For BUY: tokenIn="STABLECOIN", tokenOut="VOLATILE", amount > 0
     4. For SELL: tokenIn="VOLATILE", tokenOut="STABLECOIN", amount > 0
     5. For HOLD: amount="0"
+    6. Consider funding rate sentiment:
+       - Positive funding → Longs pay shorts → Caution for new longs
+       - Negative funding → Shorts pay longs → Caution for new shorts
+       - Extreme sentiment (|score| > 0.8) indicates potential reversal
     
     YOUR TASK:
-    1. Analyze the price spike when provided
-    2. Make a FINAL decision (buy/sell/hold)
+    1. Analyze ALL factors (price, volume, regime, funding rates)
+    2. Make FINAL decision (buy/sell/hold) considering:
+       a. Bayesian confidence level
+       b. Funding rate sentiment extremes
+       c. Market regime context
     3. Return COMPLETE, VALID JSON with ALL required fields
     4. NEVER truncate the response`;
     
-        return {
-            config: {
-                system,
-                instructions
-            },
-            bayesianAnalysis: analysis
-        };
-    }
+    return {
+        config: {
+            system,
+            instructions
+        },
+        bayesianAnalysis: analysis
+    };
+  }
 }

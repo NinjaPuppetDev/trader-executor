@@ -12,7 +12,7 @@ import {RiskManager} from "../src/RiskManager.sol";
 
 contract DeployFullSystem is Script {
     // Constants (unchanged)
-    int256 public constant VOLATILE_INITIAL_PRICE = 3652e8;
+    int256 public constant VOLATILE_INITIAL_PRICE = 3700e8;
     int256 public constant STABLE_INITIAL_PRICE = 1e8;
     uint256 public constant SPIKE_THRESHOLD = 10;
     uint256 public constant COOLDOWN_PERIOD = 300;

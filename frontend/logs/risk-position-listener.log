@@ -71,3 +71,26 @@
 {"level":"warn","message":"⚠️ StopLossUpdated event not found in ABI. Stop-loss updates will not be tracked","service":"risk-position-listener","timestamp":"2025-07-19 13:03:20"}
 {"level":"info","message":"🔄 Started dynamic stop loss monitor","service":"risk-position-listener","timestamp":"2025-07-19 13:03:20"}
 {"level":"info","message":"✅ Risk health server on port 3003","service":"risk-position-listener","timestamp":"2025-07-19 13:03:20"}
+{"level":"info","message":"✅ Database connected","service":"risk-position-listener","timestamp":"2025-07-22 08:22:54"}
+{"level":"info","message":"🚀 Starting Risk Position Listener","service":"risk-position-listener","timestamp":"2025-07-22 08:22:54"}
+{"level":"warn","message":"⚠️ StopLossUpdated event not found in ABI. Stop-loss updates will not be tracked","service":"risk-position-listener","timestamp":"2025-07-22 08:22:54"}
+{"level":"info","message":"🔄 Started dynamic stop loss monitor","service":"risk-position-listener","timestamp":"2025-07-22 08:22:54"}
+{"level":"info","message":"✅ Risk health server on port 3003","service":"risk-position-listener","timestamp":"2025-07-22 08:22:54"}
+{"level":"info","message":"🛑 Shutting down...","service":"risk-position-listener","timestamp":"2025-07-22 08:23:50"}
+{"level":"info","message":"🛑 Dynamic stop loss monitor stopped","service":"risk-position-listener","timestamp":"2025-07-22 08:23:50"}
+{"level":"info","message":"🛑 Database connection closed","service":"risk-position-listener","timestamp":"2025-07-22 08:23:50"}
+{"level":"info","message":"🛑 Health server stopped","service":"risk-position-listener","timestamp":"2025-07-22 08:23:50"}
+{"level":"info","message":"✅ Database connected","service":"risk-position-listener","timestamp":"2025-07-22 08:25:16"}
+{"level":"info","message":"🚀 Starting Risk Position Listener","service":"risk-position-listener","timestamp":"2025-07-22 08:25:16"}
+{"level":"warn","message":"⚠️ StopLossUpdated event not found in ABI. Stop-loss updates will not be tracked","service":"risk-position-listener","timestamp":"2025-07-22 08:25:16"}
+{"level":"info","message":"🔄 Started dynamic stop loss monitor","service":"risk-position-listener","timestamp":"2025-07-22 08:25:16"}
+{"level":"info","message":"✅ Risk health server on port 3003","service":"risk-position-listener","timestamp":"2025-07-22 08:25:16"}
+{"level":"info","message":"🛑 Shutting down...","service":"risk-position-listener","timestamp":"2025-07-22 15:55:56"}
+{"level":"info","message":"🛑 Dynamic stop loss monitor stopped","service":"risk-position-listener","timestamp":"2025-07-22 15:55:56"}
+{"level":"info","message":"🛑 Database connection closed","service":"risk-position-listener","timestamp":"2025-07-22 15:55:56"}
+{"level":"info","message":"🛑 Health server stopped","service":"risk-position-listener","timestamp":"2025-07-22 15:55:56"}
+{"level":"info","message":"✅ Database connected","service":"risk-position-listener","timestamp":"2025-07-22 15:57:49"}
+{"level":"info","message":"🚀 Starting Risk Position Listener","service":"risk-position-listener","timestamp":"2025-07-22 15:57:49"}
+{"level":"warn","message":"⚠️ StopLossUpdated event not found in ABI. Stop-loss updates will not be tracked","service":"risk-position-listener","timestamp":"2025-07-22 15:57:49"}
+{"level":"info","message":"🔄 Started dynamic stop loss monitor","service":"risk-position-listener","timestamp":"2025-07-22 15:57:49"}
+{"level":"info","message":"✅ Risk health server on port 3003","service":"risk-position-listener","timestamp":"2025-07-22 15:57:49"}
