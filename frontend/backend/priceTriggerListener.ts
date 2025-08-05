@@ -10,12 +10,14 @@ import cors from 'cors';
 import "reflect-metadata";
 import {
     PriceDetectionLog,
-    ApiDebugLog
+    ApiDebugLog,
+    Position
 } from "../backend/shared/entities";
 import { DataSource } from "typeorm";
 import { TradingDecision, BayesianRegressionResult } from "./types";
 import ExchangeAbi from "../app/abis/Exchange.json";
 import { MarketDataCollector } from "./utils/marketDataCollector";
+import { PositionManager } from "./positionManager";
 
 dotenv.config();
 
@@ -27,15 +29,18 @@ const DATABASE_PATH = process.env.DATABASE_PATH || "data/trading-system.db";
 
 const CONFIG = {
     VENICE_API_KEY: process.env.VENICE_API_KEY || "",
-    RPC_URL: process.env.RPC_URL || "http://127.0.0.1:8545",
+    RPC_URL: process.env.RPC_URL || "ws://127.0.0.1:8545",
     PRICE_TRIGGER_ADDRESS: process.env.PRICE_TRIGGER_ADDRESS || "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
     EXCHANGE_ADDRESS: process.env.EXCHANGE_ADDRESS || "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
-    DEBUG: false, // Disable debug logging by default
+    DEBUG: false,
     GRAPHQL_ENDPOINT: process.env.GRAPHQL_ENDPOINT || "http://localhost:4000/graphql",
-    EVENT_COOLDOWN: 30000, // 30 seconds
+    EVENT_COOLDOWN: 10000, // 10 seconds
     PAIR_ID: process.env.PAIR_ID || "1",
     TRADING_PAIR: process.env.TRADING_PAIR || "ethusdt",
-    DATABASE_PATH
+    DATABASE_PATH,
+    WARMUP_PERIOD: parseInt(process.env.WARMUP_PERIOD || "120000"), // 2 minutes
+    RISK_REWARD_RATIO: parseFloat(process.env.RISK_REWARD_RATIO || "2.5"),
+    STRONG_SPIKE_THRESHOLD: parseFloat(process.env.STRONG_SPIKE_THRESHOLD || "0.5") // 0.5%
 };
 
 // ======================
@@ -44,16 +49,16 @@ const CONFIG = {
 export const AppDataSource = new DataSource({
     type: "sqlite",
     database: CONFIG.DATABASE_PATH,
-    entities: [PriceDetectionLog, ApiDebugLog],
+    entities: [PriceDetectionLog, ApiDebugLog, Position],
     synchronize: true,
-    logging: false // Disable TypeORM logging
+    logging: false
 });
 
 // ======================
 // Price Trigger Listener
 // ======================
 export class PriceTriggerListener {
-    private provider: ethers.providers.JsonRpcProvider;
+    private provider: ethers.providers.WebSocketProvider;
     private priceTriggerContract: ethers.Contract;
     private graphQLClient: GraphQLClient;
     private isProcessing: boolean = false;
@@ -61,9 +66,12 @@ export class PriceTriggerListener {
     private exchangeContract: ethers.Contract;
     private marketDataCollector: MarketDataCollector;
     private promptService: PromptService;
-
+    private positionManager: PositionManager;
+    private startTime: number = Date.now();
+    private positionMonitorInterval: NodeJS.Timeout | null = null;
+    
     constructor() {
-        this.provider = new ethers.providers.JsonRpcProvider(CONFIG.RPC_URL);
+        this.provider = new ethers.providers.WebSocketProvider(CONFIG.RPC_URL);
         this.priceTriggerContract = new ethers.Contract(
             CONFIG.PRICE_TRIGGER_ADDRESS,
             PriceTriggerAbi,
@@ -82,6 +90,7 @@ export class PriceTriggerListener {
             this.marketDataCollector,
             CONFIG.TRADING_PAIR
         );
+        this.positionManager = new PositionManager();
     }
 
     private async initializeDatabase() {
@@ -103,6 +112,12 @@ export class PriceTriggerListener {
         this.log("🚀 Starting Price Trigger Listener");
         this.log("🔔 Listening for price spikes to trigger AI analysis");
 
+        // Start position monitoring
+        this.positionMonitorInterval = setInterval(
+            () => this.monitorOpenPositions(), 
+            60000 // Check every minute
+        );
+
         try {
             const network = await this.provider.getNetwork();
             this.log(`⛓️ Connected to: ${network.name} (ID: ${network.chainId})`);
@@ -113,19 +128,85 @@ export class PriceTriggerListener {
         }
     }
 
+    private async monitorOpenPositions() {
+        try {
+            const positions = await this.positionManager.getOpenPositions();
+            const lastUpdate = this.marketDataCollector.getLastUpdateTime();
+            
+            const STALE_DATA_THRESHOLD = 120000; // 2 minutes
+            if (Date.now() - lastUpdate > STALE_DATA_THRESHOLD) {
+                this.log("⚠️ Skipping position monitoring: Stale market data");
+                return;
+            }
+
+            const currentPrice = this.marketDataCollector.getCurrentPrice();
+            if (currentPrice === null) {
+                this.log("⚠️ Skipping position monitoring: No market price available");
+                return;
+            }
+            
+            const PRECISION = 0.0001;
+            
+            for (const position of positions) {
+                if (position.direction === 'long') {
+                    if (currentPrice <= position.stopLoss - PRECISION) {
+                        await this.positionManager.closePosition(
+                            position.id,
+                            currentPrice,
+                            'stop_loss',
+                            undefined
+                        );
+                        this.log(`🛑 STOP LOSS TRIGGERED for LONG position`);
+                    }
+                    else if (position.takeProfit && currentPrice >= position.takeProfit + PRECISION) {
+                        await this.positionManager.closePosition(
+                            position.id,
+                            currentPrice,
+                            'take_profit',
+                            undefined
+                        );
+                        this.log(`🎯 TAKE PROFIT TRIGGERED for LONG position`);
+                    }
+                } 
+                else if (position.direction === 'short') {
+                    if (currentPrice >= position.stopLoss + PRECISION) {
+                        await this.positionManager.closePosition(
+                            position.id,
+                            currentPrice,
+                            'stop_loss',
+                            undefined
+                        );
+                        this.log(`🛑 STOP LOSS TRIGGERED for SHORT position`);
+                    }
+                    else if (position.takeProfit && currentPrice <= position.takeProfit - PRECISION) {
+                        await this.positionManager.closePosition(
+                            position.id,
+                            currentPrice,
+                            'take_profit',
+                            undefined
+                        );
+                        this.log(`🎯 TAKE PROFIT TRIGGERED for SHORT position`);
+                    }
+                }
+            }
+        } catch (error) {
+            this.error("Position monitoring error", error);
+        }
+    }
+
     private setupEventListeners() {
         try {
             const filter = this.priceTriggerContract.filters.PriceSpikeDetected();
 
             this.priceTriggerContract.on(filter, async (...args: any[]) => {
                 if (this.isProcessing) {
-                    return; // Silent skip
+                    return;
                 }
 
                 // Check cooldown
                 const now = Date.now();
                 if (now - this.lastEventTime < CONFIG.EVENT_COOLDOWN) {
-                    return; // Silent skip
+                    return;
                 }
                 this.lastEventTime = now;
 
@@ -155,177 +236,211 @@ export class PriceTriggerListener {
         }
     }
 
-    private async processPriceSpike(
-        currentPrice: ethers.BigNumber,
-        previousPrice: ethers.BigNumber,
-        changePercent: ethers.BigNumber,
-        event: ethers.Event
-    ) {
-        this.isProcessing = true;
-        const startTime = Date.now();
-        const eventId = `spike-${event.blockNumber}-${event.transactionIndex}`;
-        
-        const debugEntry = new ApiDebugLog();
-        debugEntry.id = eventId;
-        debugEntry.timestamp = new Date().toISOString();
-        
-        const logEntry = new PriceDetectionLog();
-        logEntry.id = eventId;
-        logEntry.timestamp = new Date().toISOString();
-        logEntry.createdAt = new Date().toISOString();
-        logEntry.eventTxHash = event.transactionHash;
-        logEntry.eventBlockNumber = event.blockNumber;
+private async processPriceSpike(
+    currentPrice: ethers.BigNumber,
+    previousPrice: ethers.BigNumber,
+    changePercent: ethers.BigNumber,
+    event: ethers.Event
+) {
+    // System warm-up check
+    const now = Date.now();
+    if (now - this.startTime < CONFIG.WARMUP_PERIOD) {
+        const remaining = (CONFIG.WARMUP_PERIOD - (now - this.startTime)) / 1000;
+        this.log(`⏳ Skipping event: System warming up (${remaining.toFixed(1)}s remaining)`);
+        return;
+    }
+
+    this.isProcessing = true;
+    const processingStart = Date.now();
+    const eventId = `spike-${event.blockNumber}-${event.transactionIndex}`;
     
+    const debugEntry = new ApiDebugLog();
+    debugEntry.id = eventId;
+    debugEntry.timestamp = new Date().toISOString();
+    
+    const logEntry = new PriceDetectionLog();
+    logEntry.id = eventId;
+    logEntry.timestamp = new Date().toISOString();
+    logEntry.createdAt = new Date().toISOString();
+    logEntry.eventTxHash = event.transactionHash;
+    logEntry.eventBlockNumber = event.blockNumber;
+    logEntry.regime = "trending";
+    logEntry.priceContext = "Initializing...";
+
+    // Convert prices EARLY for spike parameters
+    const currentPriceNum = parseFloat(ethers.utils.formatUnits(currentPrice, 8));
+    const previousPriceNum = parseFloat(ethers.utils.formatUnits(previousPrice, 8));
+    const changePercentNum = parseFloat(ethers.utils.formatUnits(changePercent, 2));
+    const direction = currentPriceNum > previousPriceNum ? "up" : "down";
+    const displayDirection = currentPriceNum > previousPriceNum ? "▲ BUY" : "▼ SELL";
+    const changeDisplay = Math.abs(changePercentNum).toFixed(2);
+    
+    logEntry.spikePercent = changePercentNum;
+    logEntry.currentPrice = currentPriceNum;
+
+    try {
+        // Log price spike detection
+        this.log(`📊 Price Spike Detected: ${changeDisplay}% ${displayDirection} | ` +
+                `Current: ${currentPriceNum.toFixed(4)} | ` +
+                `Previous: ${previousPriceNum.toFixed(4)}`);
+        
+        let pairId: number;
         try {
-            // 1. Get pair ID
-            let pairId: number;
-            try {
-                const pairIdBN = await this.priceTriggerContract.getPairId();
-                pairId = pairIdBN.toNumber();
-            } catch (error) {
-                pairId = parseInt(CONFIG.PAIR_ID);
-            }
-            logEntry.pairId = pairId;
-    
-            // 2. Fetch token addresses
-            const [stableAddr, volatileAddr] = await this.exchangeContract.getTokenAddresses(pairId);
-            const stableToken = ethers.utils.getAddress(stableAddr);
-            const volatileToken = ethers.utils.getAddress(volatileAddr);
-    
-            // 3. Convert prices
-            const currentPriceNum = parseFloat(ethers.utils.formatUnits(currentPrice, 8));
-            const previousPriceNum = parseFloat(ethers.utils.formatUnits(previousPrice, 8));
-            const changePercentNum = parseFloat(ethers.utils.formatUnits(changePercent, 2));
-            logEntry.spikePercent = changePercentNum;
-    
-            // 🔽 ADDED: Price spike detection logging
-            this.log(`📊 Price Spike Detected: ${changePercentNum.toFixed(2)}% | ` +
-                    `Current: ${currentPriceNum.toFixed(4)} | ` +
-                    `Previous: ${previousPriceNum.toFixed(4)}`);
-    
-            // 4. Fetch FGI data
-            let fgiData = { value: 50, classification: "Neutral" };
-            try {
-                fgiData = await getFearAndGreedIndex();
-            } catch (error) {
-                // Silent fallback
-            }
-            logEntry.fgi = fgiData.value;
-            logEntry.fgiClassification = fgiData.classification;
-    
-            // 5. Generate AI prompt
-            const promptResult = await this.promptService.generatePromptConfig();
-            const bayesianAnalysis = promptResult.bayesianAnalysis;
-            logEntry.regime = bayesianAnalysis.regime;
-    
-            const enhancedPrompt = this.enhancePromptWithSpike(
-                promptResult.config,
-                currentPriceNum,
-                previousPriceNum,
-                changePercentNum
-            );
-    
-            const promptString = JSON.stringify(enhancedPrompt);
-            logEntry.priceContext = promptString;
-            debugEntry.prompt = promptString;
-    
-            // 6. Get trading decision
-            const signal = await this.fetchTradingSignal(promptString, debugEntry);
-            const tradingDecision = await this.parseTradingDecision(
-                signal,
-                debugEntry,
-                stableToken,
-                volatileToken,
-                currentPriceNum,
-                bayesianAnalysis
-            );
-    
-            // 7. Update log with decision
-            const decisionString = JSON.stringify(tradingDecision);
-            logEntry.decision = decisionString;
-            logEntry.decisionLength = decisionString.length;
-            logEntry.tokenIn = tradingDecision.tokenIn;
-            logEntry.tokenOut = tradingDecision.tokenOut;
-            logEntry.confidence = tradingDecision.confidence;
-            logEntry.amount = tradingDecision.amount;
-            logEntry.stopLoss = tradingDecision.stopLoss;
-            logEntry.takeProfit = tradingDecision.takeProfit;
-            logEntry.status = "completed";
-    
-            // 🔽 ADDED: Trading decision and risk management logging
-            this.log(`⚖️ Trading Decision: ${tradingDecision.decision.toUpperCase()} | ` +
-                    `Confidence: ${tradingDecision.confidence} | ` +
-                    `Amount: ${tradingDecision.amount}`);
-            
+            const pairIdBN = await this.priceTriggerContract.getPairId();
+            pairId = pairIdBN.toNumber();
+        } catch {
+            pairId = parseInt(CONFIG.PAIR_ID);
+        }
+        logEntry.pairId = pairId;
+
+        const [stableAddr, volatileAddr] = await this.exchangeContract.getTokenAddresses(pairId);
+        const stableToken = ethers.utils.getAddress(stableAddr);
+        const volatileToken = ethers.utils.getAddress(volatileAddr);
+
+        let fgiData = { value: 50, classification: "Neutral" };
+        try {
+            fgiData = await getFearAndGreedIndex();
+        } catch (error) {}
+        logEntry.fgi = fgiData.value;
+        logEntry.fgiClassification = fgiData.classification;
+
+        // TYPE-SAFE PROMPT CALL
+        const promptResult = await (this.promptService as any).generatePromptConfig(
+            Math.abs(changePercentNum),
+            direction
+        );
+        const bayesianAnalysis = promptResult.bayesianAnalysis;
+        logEntry.regime = bayesianAnalysis.regime;
+
+        const enhancedPrompt = this.enhancePromptWithSpike(
+            promptResult.config,
+            currentPriceNum,
+            previousPriceNum,
+            changePercentNum
+        );
+
+        const promptString = JSON.stringify(enhancedPrompt);
+        logEntry.priceContext = promptString;
+        debugEntry.prompt = promptString;
+
+        // Get trading decision
+        const signal = await this.fetchTradingSignal(promptString, debugEntry, bayesianAnalysis);
+        const tradingDecision = await this.parseTradingDecision(
+            signal,
+            debugEntry,
+            stableToken,
+            volatileToken,
+            currentPriceNum,
+            bayesianAnalysis,
+            logEntry
+        );
+
+        // Handle position
+        await this.handlePositionAction(tradingDecision, logEntry, currentPriceNum, bayesianAnalysis);
+        
+        // Update log with final decision
+        const decisionString = JSON.stringify(tradingDecision);
+        logEntry.decision = decisionString;
+        logEntry.decisionLength = decisionString.length;
+        logEntry.tokenIn = tradingDecision.tokenIn;
+        logEntry.tokenOut = tradingDecision.tokenOut;
+        logEntry.confidence = tradingDecision.confidence;
+        logEntry.amount = tradingDecision.amount;
+        logEntry.stopLoss = tradingDecision.stopLoss || null;
+        logEntry.takeProfit = tradingDecision.takeProfit || null;
+        logEntry.status = "completed";
+        
+        if (tradingDecision.positionId) {
+            logEntry.positionId = tradingDecision.positionId;
+        }
+
+        // Decision logging
+        this.log(`⚖️ Trading Decision: ${tradingDecision.decision.toUpperCase()} | ` +
+                `Action: ${tradingDecision.positionAction.toUpperCase()} | ` +
+                `Confidence: ${tradingDecision.confidence} | ` +
+                `Amount: ${tradingDecision.amount}`);
+        
+        if (tradingDecision.positionAction !== 'hold') {
             this.log(`🛡️ Risk Management: ` +
                     `SL: ${tradingDecision.stopLoss?.toFixed(4) || 'N/A'} | ` +
                     `TP: ${tradingDecision.takeProfit?.toFixed(4) || 'N/A'}`);
-    
-            // 8. Save detection log
-            await AppDataSource.manager.save(logEntry);
-            await this.logDetectionToGraphQL(logEntry, bayesianAnalysis);
-            
-            this.log(`✅ Spike processed in ${Date.now() - startTime}ms | ID: ${logEntry.id}`);
-    
-        } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : "Unknown error";
-            this.error("Price spike processing failed", errorMsg);
-            
-            // 🔽 ADDED: Fallback decision logging
-            this.log(`⚠️ Fallback Decision: HOLD | Reason: ${errorMsg}`);
-            
-            // Create minimal decision for error case
-            const errorDecision = {
-                error: errorMsg,
-                decision: "hold",
-                amount: "0"
-            };
-            const errorString = JSON.stringify(errorDecision);
-            
-            logEntry.decision = errorString;
-            logEntry.decisionLength = errorString.length;
-            logEntry.status = "failed";
-            logEntry.tokenIn = ZERO_ADDRESS;
-            logEntry.tokenOut = ZERO_ADDRESS;
-            logEntry.confidence = "unknown";
-            logEntry.amount = "0";
-            
-            if (!logEntry.pairId) logEntry.pairId = parseInt(CONFIG.PAIR_ID);
-            
-            await AppDataSource.manager.save(logEntry);
-            debugEntry.error = errorMsg;
-            
-        } finally {
-            // Save debug log
-            await this.saveDebugLog(debugEntry);
-            this.isProcessing = false;
         }
-    }
 
-    private enhancePromptWithSpike(
-        basePrompt: any,
-        currentPrice: number,
-        previousPrice: number,
-        changePercent: number
-    ): any {
-        const direction = currentPrice > previousPrice ? "up" : "down";
-        const priceChange = Math.abs(changePercent);
+        // Save to database
+        await AppDataSource.manager.save(logEntry);
+        await this.logDetectionToGraphQL(logEntry, bayesianAnalysis);
         
-        return {
-            ...basePrompt,
-            market_context: {
-                ...(basePrompt.market_context || {}),
-                price_event: {
-                    type: "spike",
-                    direction,
-                    change_percent: priceChange,
-                    current_price: currentPrice,
-                    previous_price: previousPrice,
-                }
-            },
-            instructions: `${basePrompt.instructions}\n\nPRICE EVENT: ${priceChange.toFixed(2)}% ${direction.toUpperCase()} SPIKE`
+        this.log(`✅ Spike processed in ${Date.now() - processingStart}ms | ID: ${logEntry.id}`);
+
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : "Unknown error";
+        this.error("Price spike processing failed", errorMsg);
+        this.log(`⚠️ Fallback Decision: HOLD | Reason: ${errorMsg}`);
+        
+        const errorDecision = {
+            error: errorMsg,
+            positionAction: 'hold',
+            decision: "hold",
+            amount: "0"
         };
+        const errorString = JSON.stringify(errorDecision);
+        
+        logEntry.decision = errorString;
+        logEntry.decisionLength = errorString.length;
+        logEntry.status = "failed";
+        logEntry.tokenIn = ZERO_ADDRESS;
+        logEntry.tokenOut = ZERO_ADDRESS;
+        logEntry.confidence = "unknown";
+        logEntry.amount = "0";
+        logEntry.priceContext = `Error: ${errorMsg}`;
+        
+        if (!logEntry.pairId) logEntry.pairId = parseInt(CONFIG.PAIR_ID);
+        
+        try {
+            await AppDataSource.manager.save(logEntry);
+        } catch (dbError) {
+            this.error("Failed to save error log", dbError);
+        }
+        debugEntry.error = errorMsg;
+        
+    } finally {
+        if (CONFIG.DEBUG) {
+            try {
+                await AppDataSource.manager.save(debugEntry);
+            } catch (dbError) {
+                this.error("Failed to save debug log", dbError);
+            }
+        }
+        this.isProcessing = false;
     }
+}
+
+   private enhancePromptWithSpike(
+    basePrompt: any,
+    currentPrice: number,
+    previousPrice: number,
+    changePercent: number
+): any {
+    const direction = currentPrice > previousPrice ? "up" : "down";
+    const priceChange = Math.abs(changePercent);
+    const isStrong = priceChange > CONFIG.STRONG_SPIKE_THRESHOLD;
+    
+    return {
+        ...basePrompt,
+        market_context: {
+            ...(basePrompt.market_context || {}),
+            price_event: {
+                type: "spike",
+                direction,
+                magnitude: priceChange,
+                strength: isStrong ? "strong" : "moderate",
+                current_price: currentPrice,
+                previous_price: previousPrice
+            }
+        },
+        instructions: `${basePrompt.instructions}\n\nIMPORTANT: PRICE SPIKE DETECTED - ${priceChange.toFixed(2)}% ${direction.toUpperCase()} MOVE`
+    };
+}
 
     private async logDetectionToGraphQL(log: PriceDetectionLog, analysis: BayesianRegressionResult) {
         const mutation = gql`
@@ -356,7 +471,10 @@ export class PriceTriggerListener {
                     amount: log.amount,
                     stopLoss: log.stopLoss,
                     takeProfit: log.takeProfit,
-                    bayesianAnalysis: JSON.stringify(analysis)
+                    bayesianAnalysis: JSON.stringify(analysis),
+                    positionAction: log.positionAction,
+                    positionId: log.positionId,
+                    currentPrice: log.currentPrice
                 }
             });
         } catch (error) {
@@ -370,7 +488,8 @@ export class PriceTriggerListener {
         stableToken: string,
         volatileToken: string,
         currentPrice: number,
-        analysis: BayesianRegressionResult
+        analysis: BayesianRegressionResult,
+        logEntry: PriceDetectionLog
     ): Promise<TradingDecision> {
         type TokenMapKey = 'STABLECOIN' | 'VOLATILE';
         const tokenMap: Record<TokenMapKey, string> = {
@@ -385,6 +504,7 @@ export class PriceTriggerListener {
         };
     
         const fallbackDecision: TradingDecision = {
+            positionAction: 'hold',
             decision: 'hold',
             tokenIn: ZERO_ADDRESS,
             tokenOut: ZERO_ADDRESS,
@@ -396,6 +516,7 @@ export class PriceTriggerListener {
             takeProfit: analysis.takeProfit
         };
     
+        debugEntry.rawResponse = signal;
         debugEntry.parsedDecision = JSON.stringify(fallbackDecision);
     
         try {
@@ -424,8 +545,21 @@ export class PriceTriggerListener {
                 parsed.takeProfit = analysis.takeProfit;
             }
             
+            // Add position action if missing
+            if (!parsed.positionAction) {
+                parsed.positionAction = 'open';
+            }
+            
+            // Try to find position ID if not provided but needed
+            if (['close', 'adjust'].includes(parsed.positionAction) && !parsed.positionId) {
+                const openPosition = await this.positionManager.getOpenPosition(logEntry.pairId);
+                if (openPosition) {
+                    parsed.positionId = openPosition.id;
+                }
+            }
+            
             // Validate and adjust
-            return this.validateDecisionStructure(
+            const validatedDecision = this.validateDecisionStructure(
                 parsed,
                 stableToken,
                 volatileToken,
@@ -433,19 +567,13 @@ export class PriceTriggerListener {
                 analysis
             );
             
+            debugEntry.parsedDecision = JSON.stringify(validatedDecision);
+            return validatedDecision;
+            
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : "Parsing error";
             debugEntry.error = errorMsg;
             return fallbackDecision;
-        }
-    }
-
-    private async saveDebugLog(entry: ApiDebugLog) {
-        if (!CONFIG.DEBUG) return;
-        try {
-            await AppDataSource.manager.save(entry);
-        } catch (error) {
-            console.error('Failed to save debug log', error);
         }
     }
 
@@ -460,46 +588,58 @@ export class PriceTriggerListener {
             throw new Error("Invalid decision object");
         }
 
+        // Validate position action
+        if (!['open', 'close', 'adjust', 'hold'].includes(decision.positionAction)) {
+            throw new Error(`Invalid position action: ${decision.positionAction}`);
+        }
+
         const action = decision.decision?.toString().toLowerCase().trim() || 'hold';
         if (!['buy', 'sell', 'hold'].includes(action)) {
             throw new Error(`Invalid decision type: ${decision.decision}`);
         }
 
-        if (action === "hold") {
+        // Handle hold decisions
+        if (action === "hold" || decision.positionAction === "hold") {
             return {
+                positionAction: 'hold',
                 decision: 'hold',
                 tokenIn: ZERO_ADDRESS,
                 tokenOut: ZERO_ADDRESS,
                 amount: "0",
                 slippage: 0,
                 reasoning: decision.reasoning || "Market conditions uncertain",
-                confidence: "medium",
+                confidence: this.getConfidenceLevel(analysis.probability),
                 stopLoss: analysis.stopLoss,
-                takeProfit: analysis.takeProfit
+                takeProfit: analysis.takeProfit,
+                positionId: decision.positionId
             };
         }
 
-        // Validate token addresses
-        const tokenIn = decision.tokenIn ? ethers.utils.getAddress(decision.tokenIn) : '';
-        const tokenOut = decision.tokenOut ? ethers.utils.getAddress(decision.tokenOut) : '';
+        // Validate token addresses for open positions
+        if (decision.positionAction === 'open') {
+            const tokenIn = decision.tokenIn ? ethers.utils.getAddress(decision.tokenIn) : '';
+            const tokenOut = decision.tokenOut ? ethers.utils.getAddress(decision.tokenOut) : '';
 
-        if (action === 'buy') {
-            if (tokenIn !== stableToken || tokenOut !== volatileToken) {
-                throw new Error(`For BUY: tokenIn must be stablecoin and tokenOut must be volatile token`);
-            }
-        } else if (action === 'sell') {
-            if (tokenIn !== volatileToken || tokenOut !== stableToken) {
-                throw new Error(`For SELL: tokenIn must be volatile token and tokenOut must be stablecoin`);
+            if (action === 'buy') {
+                if (tokenIn !== stableToken || tokenOut !== volatileToken) {
+                    throw new Error(`For BUY: tokenIn must be stablecoin and tokenOut must be volatile token`);
+                }
+            } else if (action === 'sell') {
+                if (tokenIn !== volatileToken || tokenOut !== stableToken) {
+                    throw new Error(`For SELL: tokenIn must be volatile token and tokenOut must be stablecoin`);
+                }
             }
         }
 
-        // Validate amount
-        const amount = parseFloat(decision.amount?.toString() || "0");
-        if (isNaN(amount) || amount <= 0) {
-            throw new Error(`Invalid trade amount: ${decision.amount}`);
+        // Validate amount for open positions
+        if (decision.positionAction === 'open') {
+            const amount = parseFloat(decision.amount?.toString() || "0");
+            if (isNaN(amount) || amount <= 0) {
+                throw new Error(`Invalid trade amount: ${decision.amount}`);
+            }
         }
 
-        // Apply Bayesian SL/TP if missing
+        // Apply Bayesian SL/TP as fallback
         let stopLoss = decision.stopLoss;
         let takeProfit = decision.takeProfit;
         
@@ -510,49 +650,264 @@ export class PriceTriggerListener {
             takeProfit = analysis.takeProfit;
         }
 
-        // Adjust SL/TP to be realistic
+        // Enhanced risk management thresholds
+        const MIN_DISTANCE_PERCENT = 0.001; // 0.1% minimum distance
+        const MIN_DISTANCE = currentPrice * MIN_DISTANCE_PERCENT;
+        const FALLBACK_THRESHOLD = 0.005; // 0.5%
+
         if (action === 'buy') {
-            if (stopLoss >= currentPrice) stopLoss = currentPrice * 0.995;
-            if (takeProfit <= currentPrice) takeProfit = currentPrice * 1.005;
+            // Ensure SL is below current price
+            if (stopLoss >= currentPrice - MIN_DISTANCE) {
+                stopLoss = currentPrice * (1 - FALLBACK_THRESHOLD);
+            }
+            
+            // Ensure TP is above current price
+            if (takeProfit <= currentPrice + MIN_DISTANCE) {
+                takeProfit = currentPrice * (1 + FALLBACK_THRESHOLD);
+            }
         } else if (action === 'sell') {
-            if (stopLoss <= currentPrice) stopLoss = currentPrice * 1.005;
-            if (takeProfit >= currentPrice) takeProfit = currentPrice * 0.995;
+            // Ensure SL is above current price
+            if (stopLoss <= currentPrice + MIN_DISTANCE) {
+                stopLoss = currentPrice * (1 + FALLBACK_THRESHOLD);
+            }
+            
+            // Ensure TP is below current price
+            if (takeProfit >= currentPrice - MIN_DISTANCE) {
+                takeProfit = currentPrice * (1 - FALLBACK_THRESHOLD);
+            }
+        }
+
+        // Final validation for SL/TP values
+        if (action === 'buy') {
+            if (stopLoss >= currentPrice || takeProfit <= currentPrice) {
+                throw new Error(`Invalid SL/TP for BUY: SL ${stopLoss} >= ${currentPrice} or TP ${takeProfit} <= ${currentPrice}`);
+            }
+        } else if (action === 'sell') {
+            if (stopLoss <= currentPrice || takeProfit >= currentPrice) {
+                throw new Error(`Invalid SL/TP for SELL: SL ${stopLoss} <= ${currentPrice} or TP ${takeProfit} >= ${currentPrice}`);
+            }
         }
 
         return {
+            positionAction: decision.positionAction,
             decision: action as 'buy' | 'sell',
-            tokenIn,
-            tokenOut,
-            amount: amount.toString(),
+            tokenIn: decision.tokenIn || ZERO_ADDRESS,
+            tokenOut: decision.tokenOut || ZERO_ADDRESS,
+            amount: decision.amount || "0",
             slippage: decision.slippage || 0.5,
             reasoning: decision.reasoning || "Statistical trade execution",
             confidence: (decision.confidence || 'medium').toLowerCase() as 'high' | 'medium' | 'low',
             stopLoss,
-            takeProfit
+            takeProfit,
+            positionId: decision.positionId
         };
     }
 
-    private async fetchTradingSignal(prompt: string, debugEntry: ApiDebugLog): Promise<string> {
+    private getConfidenceLevel(probability: number): 'high' | 'medium' | 'low' {
+        if (probability > 0.8) return 'high';
+        if (probability > 0.6) return 'medium';
+        return 'low';
+    }
+
+    private async handlePositionAction(
+    decision: TradingDecision,
+    logEntry: PriceDetectionLog,
+    currentPrice: number,
+    bayesianAnalysis: BayesianRegressionResult
+) {
+    // Set position action in log entry
+    logEntry.positionAction = decision.positionAction as any;
+    
+    // Get existing position
+    const existingPosition = await this.positionManager.getOpenPosition(logEntry.pairId);
+    
+    if (existingPosition) {
+        // Extract position details with type safety
+        const isLong = (existingPosition as any).isLong || 
+                      (existingPosition as any).direction === 'long';
+        
+        const entryPrice = parseFloat(
+            (existingPosition as any).entryPrice || 
+            (existingPosition as any).openPrice || 
+            "0"
+        );
+        
+        const positionAmount = parseFloat(
+            (existingPosition as any).amount || 
+            (existingPosition as any).size || 
+            "0"
+        );
+        
+        // Fallback for position creation time
+        let positionAge = 0;
+        if ((existingPosition as any).createdAt) {
+            positionAge = Date.now() - new Date((existingPosition as any).createdAt).getTime();
+        } else if ((existingPosition as any).openedAt) {
+            positionAge = Date.now() - new Date((existingPosition as any).openedAt).getTime();
+        } else {
+            // Default to "old enough" if we can't determine age
+            positionAge = 600000; // 10 minutes
+        }
+        
+        const decisionIsBuy = decision.decision === 'buy';
+        const isCounterPosition = (isLong && !decisionIsBuy) || (!isLong && decisionIsBuy);
+        
+        // Calculate position profitability
+        const positionProfit = isLong ? 
+            (currentPrice - entryPrice) * positionAmount :
+            (entryPrice - currentPrice) * positionAmount;
+        
+        const isProfitable = positionProfit > 0;
+        const MIN_HOLD_DURATION = 120000; // 2 minutes
+        
+        // NEW: Confidence-based position handling
+        const confidenceValue = {
+            'high': 3,
+            'medium': 2,
+            'low': 1
+        }[decision.confidence] || 1;
+        
+        this.log(`🛡️ Position Conflict: ${existingPosition.direction} | ` +
+                `Age: ${(positionAge/1000).toFixed(1)}s | ` +
+                `PnL: ${positionProfit.toFixed(4)} | ` +
+                `Confidence: ${decision.confidence} (${confidenceValue})`);
+        
+        switch (decision.positionAction) {
+            case 'open':
+                if (isCounterPosition) {
+                    // High confidence counter-trade
+                    if (confidenceValue >= 2) {
+                        this.log(`⚠️ HIGH-CONFIDENCE COUNTER-SIGNAL: Closing existing position`);
+                        decision.positionAction = 'close';
+                        decision.positionId = existingPosition.id;
+                        decision.amount = "0";
+                    } 
+                    // Medium confidence with unprofitable position
+                    else if (!isProfitable) {
+                        this.log(`⚠️ MEDIUM-CONFIDENCE COUNTER-SIGNAL: Closing unprofitable position`);
+                        decision.positionAction = 'close';
+                        decision.positionId = existingPosition.id;
+                        decision.amount = "0";
+                    }
+                    else {
+                        this.log(`⏸️ Holding counter-signal (low confidence/profitable position)`);
+                        decision.positionAction = 'hold';
+                    }
+                } else {
+                    // Same direction - only open if strong signal
+                    if (confidenceValue >= 3 && positionAge > MIN_HOLD_DURATION) {
+                        this.log(`📈 Adding to position with high confidence`);
+                        // Keep open action but reduce size
+                        decision.amount = (parseFloat(decision.amount) * 0.5).toString();
+                    } else {
+                        this.log(`⏸️ Existing position in same direction - holding`);
+                        decision.positionAction = 'hold';
+                    }
+                }
+                break;
+                
+            case 'close':
+                if (!decision.positionId) {
+                    decision.positionId = existingPosition.id;
+                }
+                if (positionAge < MIN_HOLD_DURATION && isProfitable) {
+                    this.log(`⏱️ Blocked close signal (position too new and profitable)`);
+                    decision.positionAction = 'hold';
+                }
+                break;
+                
+            case 'adjust':
+                if (!decision.positionId) {
+                    decision.positionId = existingPosition.id;
+                }
+                // Add profit protection for adjustments
+                await this.positionManager.applyProfitProtection(existingPosition, currentPrice);
+                break;
+        }
+    }
+
+    // Execute position actions
+    switch (decision.positionAction) {
+        case 'open':
+            if (existingPosition && !decision.positionId) {
+                // We already handled same-direction positions above
+                const newPosition = await this.positionManager.openPosition(
+                    logEntry.pairId,
+                    CONFIG.TRADING_PAIR,
+                    decision.decision === 'buy' ? 'long' : 'short',
+                    parseFloat(decision.amount),
+                    currentPrice,
+                    decision.stopLoss || 0,
+                    decision.takeProfit || 0,
+                    logEntry.id
+                );
+                logEntry.positionId = newPosition.id;
+                this.log(`📈 OPENED ${newPosition.direction.toUpperCase()} POSITION`);
+            }
+            break;
+                        
+        case 'close':
+            if (decision.positionId) {
+                await this.positionManager.closePosition(
+                    decision.positionId,
+                    currentPrice,
+                    'signal_close',
+                    logEntry.id
+                );
+                this.log(`📉 CLOSED POSITION`);
+            } else {
+                this.log(`⚠️ Close requested but no position ID found`);
+                decision.positionAction = 'hold';
+            }
+            break;
+                        
+        case 'adjust':
+            if (decision.positionId) {
+                await this.positionManager.updatePosition(
+                    decision.positionId,
+                    {
+                        stopLoss: decision.stopLoss,
+                        takeProfit: decision.takeProfit
+                    }
+                );
+                this.log(`⚙️ ADJUSTED POSITION`);
+            } else {
+                this.log(`⚠️ Adjust requested but no position ID found`);
+                decision.positionAction = 'hold';
+            }
+            break;
+                        
+        case 'hold':
+            this.log(`⏸️ HOLDING`);
+            break;
+    }
+}
+
+    private async fetchTradingSignal(
+        prompt: string, 
+        debugEntry: ApiDebugLog,
+        analysis: BayesianRegressionResult
+    ): Promise<string> {
         try {
             if (!CONFIG.VENICE_API_KEY) {
                 throw new Error("VENICE_API_KEY not set");
             }
-    
+        
             return await fetchTradingSignal(prompt, CONFIG.VENICE_API_KEY);
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : "API error";
             
-            // Return valid fallback
             return JSON.stringify({
                 reasoning: `Error: ${errorMsg}`,
+                positionAction: "hold",
                 decision: "hold",
                 tokenIn: "STABLECOIN",
                 tokenOut: "VOLATILE",
                 amount: "0",
                 slippage: 0.5,
                 confidence: "medium",
-                stopLoss: 0,
-                takeProfit: 0
+                stopLoss: analysis.stopLoss,
+                takeProfit: analysis.takeProfit
             });
         }
     }

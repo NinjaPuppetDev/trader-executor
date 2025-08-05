@@ -1,8 +1,10 @@
-// Updated promptService.ts
 import { MarketDataCollector } from "../utils/marketDataCollector";
 import { BayesianPriceAnalyzer } from "../utils/bayesianPriceAnalyzer";
-import { FundingRateAnalyzer } from "../fundingRateAnalyzer"; // Add import
-import { MarketDataState, BayesianRegressionResult, MarketRegime } from "../types";
+import { FundingRateAnalyzer } from "../fundingRateAnalyzer";
+import { MarketDataState, BayesianRegressionResult, MarketRegime, OHLC } from "../types";
+import { HistoricalDataService } from "../historicalDataService";
+import { PositionManager } from "../positionManager";
+import { AppDataSource } from "../priceTriggerListener";
 
 function renderTemplate<T extends Record<string, unknown>>(template: string, data: T): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) =>
@@ -22,7 +24,7 @@ export class PromptService {
   constructor(
     private marketDataCollector: MarketDataCollector,
     private symbol: string = 'ethusdt',
-    private fundingRateAnalyzer?: FundingRateAnalyzer // Add optional parameter
+    private fundingRateAnalyzer?: FundingRateAnalyzer
   ) {}
 
   private getMarketState(): MarketDataState {
@@ -32,51 +34,139 @@ export class PromptService {
 
   private getFallbackState(): MarketDataState {
     const price = 3000;
+    const timestamp = Date.now();
+    const candle: OHLC = {
+      open: price,
+      high: price,
+      low: price,
+      close: price,
+      volume: 0,
+      timestamp: timestamp - 300000
+    };
+
     return {
-      prices: [price],
-      volumes: [0],
-      currentPrice: price,
-      averageVolume: 0,
-      timestamp: Date.now(),
+      ohlcHistory: [candle],
+      currentCandle: candle,
+      candleDuration: 300000,
+      dataDuration: 300000,
+      timestamp,
       symbol: this.symbol,
-      regime: 'consolidating',
+      currentPrice: price,
       additional: { high: price, low: price },
-    } as MarketDataState;
+      regime: 'consolidating'
+    };
   }
 
-  generatePromptConfig(): { config: any; bayesianAnalysis: BayesianRegressionResult } {
+  async generatePromptConfig(): Promise<{ config: any; bayesianAnalysis: BayesianRegressionResult }> {
     const state = this.getMarketState();
     const analysis = BayesianPriceAnalyzer.analyze(state);
+    const historicalService = new HistoricalDataService();
+    const positionManager = new PositionManager();
     
     // Get funding rate sentiment if available
-    const fundingSentiment = this.fundingRateAnalyzer?.getCurrentSentiment();
-    const fundingStr = fundingSentiment 
-      ? `${fundingSentiment.overallSentiment} (Score: ${fundingSentiment.score.toFixed(3)})`
-      : 'Not available';
+    let fundingStr = 'Not available';
+    try {
+      const fundingSentiment = this.fundingRateAnalyzer?.getCurrentSentiment();
+      fundingStr = fundingSentiment 
+        ? `${fundingSentiment.overallSentiment} (Score: ${fundingSentiment.score.toFixed(3)})`
+        : 'Not available';
+    } catch (error) {
+      console.error('Error getting funding sentiment:', error);
+    }
 
+    // Get recent price history
+    const pairId = parseInt(process.env.PAIR_ID || "1");
+    let historyFormatted = "No history available";
+    let trendAnalysis = "No trend analysis available";
+    
+    try {
+      const history = await historicalService.getRecentPriceHistory(pairId);
+      historyFormatted = historicalService.formatHistoryForPrompt(history);
+      trendAnalysis = historicalService.analyzeTrend(history, state.currentPrice);
+    } catch (error) {
+      console.error('Error processing history:', error);
+    }
+    
+    // Get current open position
+    let openPosition = null;
+    try {
+      openPosition = await positionManager.getOpenPosition(pairId);
+    } catch (error) {
+      console.error('Error fetching position:', error);
+    }
+
+    // Calculate position PnL safely
+    let positionCurrentPnL = 0;
+    if (openPosition && state.currentPrice !== null) {
+      positionCurrentPnL = openPosition.direction === 'long' 
+        ? (state.currentPrice - openPosition.openPrice) * openPosition.amount
+        : (openPosition.openPrice - state.currentPrice) * openPosition.amount;
+    }
+    
+    // Prepare template data with null-safe formatting
     const templateData = {
       symbol: state.symbol.toUpperCase(),
-      currentPrice: state.currentPrice.toFixed(4),
+      currentPrice: state.currentPrice !== null ? state.currentPrice.toFixed(4) : 'N/A',
       predictedPrice: analysis.predictedPrice.toFixed(4),
       volatilityPercent: (analysis.volatility * 100).toFixed(2),
       regime: analysis.regime.toUpperCase(),
       stopLoss: analysis.stopLoss.toFixed(4),
       takeProfit: analysis.takeProfit.toFixed(4),
-      fundingSentiment: fundingStr // Add to template
+      fundingSentiment: fundingStr,
+      priceHistory: historyFormatted,
+      trendAnalysis: trendAnalysis,
+      hasOpenPosition: !!openPosition,
+      positionDirection: openPosition?.direction || 'none',
+      positionOpenPrice: openPosition?.openPrice?.toFixed(4) || 'N/A',
+      positionCurrentPnL: positionCurrentPnL.toFixed(4),
+      positionStopLoss: openPosition?.stopLoss?.toFixed(4) || 'N/A',
+      positionTakeProfit: openPosition?.takeProfit?.toFixed(4) || 'N/A'
     };
 
+    // System prompt template
     const sysTemplate = [
-        'TRADING AGENT PROTOCOL - STRICT RULES APPLY',
+        'OHLC-BASED TRADING AGENT PROTOCOL - STRICT RULES APPLY',
         'Symbol: {{symbol}}',
         'Current Price: {{currentPrice}}',
         'Predicted Price: {{predictedPrice}}',
         'Volatility: {{volatilityPercent}}%',
         'Market Regime: {{regime}}',
-        'Funding Rate Sentiment: {{fundingSentiment}}', // New line
+        'Funding Rate Sentiment: {{fundingSentiment}}',
         '',
         'KEY LEVELS:',
         `Stop Loss: {{stopLoss}}`,
         `Take Profit: {{takeProfit}}`,
+        '',
+        'RECENT PRICE HISTORY:',
+        '{{priceHistory}}',
+        '',
+        'TREND ANALYSIS:',
+        '{{trendAnalysis}}',
+        '',
+        'POSITION MANAGEMENT RULES:',
+        '1. If there is NO open position:',
+        '   - You may OPEN a new position with "open" action',
+        '2. If there is an OPEN position:',
+        '   - You may CLOSE it with "close" action and positionId',
+        '   - You may ADJUST stop loss/take profit with "adjust" action and positionId',
+        '   - You may HOLD and do nothing',
+        '3. Position actions:',
+        '   - "open": Open a new position (requires all position fields)',
+        '   - "close": Close existing position (requires positionId)',
+        '   - "adjust": Update existing position (requires positionId and SL/TP)',
+        '   - "hold": Maintain current position',
+        '4. When closing:',
+        '   - Always include positionId of the position to close',
+        '   - Amount should be "0" for close actions',
+        '5. When adjusting:',
+        '   - Only update stopLoss and/or takeProfit',
+        '   - Other fields remain unchanged',
+        '',
+        'OHLC VOLUME-BASED RULES:',
+        '1. Volume Confirmation REQUIRED for breakouts',
+        '2. Volume Divergence indicates potential reversals',
+        '3. Low volume = reduced position sizing',
+        '4. High volume spikes = increased confidence',
         '',
         'ABSOLUTE REQUIREMENTS:',
         '1. For BUY/SELL decisions:',
@@ -99,6 +189,7 @@ export class PromptService {
         '',
         'OUTPUT FORMAT - COMPLETE VALID JSON ONLY:',
         '{',
+        '  "positionAction": "open|close|adjust|hold",',
         '  "decision": "buy|sell|hold",',
         '  "tokenIn": "STABLECOIN|VOLATILE",',
         '  "tokenOut": "STABLECOIN|VOLATILE",',
@@ -106,6 +197,7 @@ export class PromptService {
         '  "slippage": 0.5,',
         '  "stopLoss": 2950.25, // MUST BE NUMBER',
         '  "takeProfit": 3100.75, // MUST BE NUMBER',
+        '  "positionId": "uuid-for-close-adjust", // REQUIRED FOR CLOSE/ADJUST',
         '  "reasoning": "Detailed analysis here..."',
         '}',
         '',
@@ -127,33 +219,54 @@ export class PromptService {
     const trend = analysis.trendDirection as Trend;
     const icon = this.ICONS[trend];
     
-    // Add funding rate interpretation to rules
-    const instructions = `CURRENT MARKET ANALYSIS:
+    // Position context
+    const positionContext = openPosition
+      ? `CURRENT OPEN POSITION:
+        - Direction: ${openPosition.direction.toUpperCase()} ${openPosition.direction === 'long' ? '📈' : '📉'}
+        - Open Price: ${openPosition.openPrice?.toFixed(4) || 'N/A'}
+        - Current PnL: ${positionCurrentPnL.toFixed(4)} ${positionCurrentPnL > 0 ? '✅' : '❌'}
+        - Stop Loss: ${openPosition.stopLoss?.toFixed(4) || 'N/A'}
+        - Take Profit: ${openPosition.takeProfit?.toFixed(4) || 'N/A'}`
+      : 'NO OPEN POSITIONS';
+    
+    const instructions = `OHLC MARKET ANALYSIS:
     - Trend: ${trend.toUpperCase()} ${icon}
     - Confidence: ${(analysis.probability * 100).toFixed(1)}%
     - Volatility: ${(analysis.volatility * 100).toFixed(2)}%
     - Regime: ${analysis.regime.toUpperCase()}
     - Price Spike: [WILL BE ADDED LATER]
     
-    TRADING RULES:
-    1. Only execute trades when confidence > 60%
-    2. Use Bayesian levels as reference:
+    ${positionContext}
+    
+    VOLUME-BASED TRADING RULES:
+    1. Volume Confirmation: ${analysis.probability > 0.6 ? '✅' : '❌'} (Required for breakouts)
+    2. Volume Strength: ${(analysis.volatility * 100).toFixed(1)}%
+    3. Position sizing based on volume:
+       - Low volume → 25-50% position size
+       - Medium volume → 50-75% position size
+       - High volume → 75-100% position size
+    
+    RISK MANAGEMENT:
+    1. Bayesian Levels:
        - Stop Loss: ${analysis.stopLoss.toFixed(4)}
        - Take Profit: ${analysis.takeProfit.toFixed(4)}
-    3. For BUY: tokenIn="STABLECOIN", tokenOut="VOLATILE", amount > 0
-    4. For SELL: tokenIn="VOLATILE", tokenOut="STABLECOIN", amount > 0
-    5. For HOLD: amount="0"
-    6. Consider funding rate sentiment:
+    2. Max Risk: 1% per trade
+    3. Volatility Scaling: Positions reduced during high volatility
+    
+    FUNDING RATE CONSIDERATIONS:
+    1. Current Funding: ${fundingStr}
+    2. Rules:
        - Positive funding → Longs pay shorts → Caution for new longs
        - Negative funding → Shorts pay longs → Caution for new shorts
        - Extreme sentiment (|score| > 0.8) indicates potential reversal
     
-    YOUR TASK:
-    1. Analyze ALL factors (price, volume, regime, funding rates)
-    2. Make FINAL decision (buy/sell/hold) considering:
-       a. Bayesian confidence level
-       b. Funding rate sentiment extremes
-       c. Market regime context
+    YOUR EXECUTION PLAN:
+    1. Analyze ALL factors (OHLC patterns, volume, regime, funding rates, position)
+    2. Make FINAL decision considering:
+       a. Volume confirmation status
+       b. Bayesian confidence level
+       c. Funding rate sentiment
+       d. Current position status
     3. Return COMPLETE, VALID JSON with ALL required fields
     4. NEVER truncate the response`;
     

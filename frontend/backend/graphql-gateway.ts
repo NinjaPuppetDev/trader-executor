@@ -12,16 +12,25 @@ import {
   TradeExecutionLog,
   ApiDebugLog,
   RiskPosition,
-  ProcessedTrigger
+  ProcessedTrigger,
+  Position
 } from './shared/entities';
+import { BayesianRegressionResult, MarketRegime } from './types';
 
 // ======================
 // Database Initialization
 // ======================
 const AppDataSource = new DataSource({
   type: "sqlite",
-  database: "data/trading-db.sqlite",
-  entities: [PriceDetectionLog, TradeExecutionLog, ApiDebugLog, RiskPosition, ProcessedTrigger],
+  database: "data/trading-system.db",
+  entities: [
+    PriceDetectionLog, 
+    TradeExecutionLog, 
+    ApiDebugLog, 
+    RiskPosition, 
+    ProcessedTrigger,
+    Position
+  ],
   synchronize: true,
   logging: false
 });
@@ -86,6 +95,13 @@ const typeDefs = `#graphql
     entryPrice: String
     regime: String!
     bayesianAnalysis: BayesianRegressionResult
+    currentPrice: Float!
+    positionAction: String
+    
+    # Backward-compatible cluster analytics fields
+    clusterSize: Int
+    clusterVolatility: Float
+    clusterSpikes: [Float]
   }
 
   type ApiDebugLog {
@@ -111,7 +127,26 @@ const typeDefs = `#graphql
     closedAt: String
     closedAmount: String
     closedReason: String
-    metadata: String  # ADDED METADATA FIELD
+    metadata: String
+  }
+  
+  type Position {
+    id: ID!
+    pairId: Int!
+    symbol: String!
+    openedAt: String!
+    closedAt: String
+    openPrice: Float!
+    closePrice: Float
+    direction: String!
+    amount: Float!
+    stopLoss: Float!
+    takeProfit: Float!
+    status: String!
+    pnl: Float
+    closeReason: String
+    openDetectionId: String
+    closeDetectionId: String
   }
 
   type ProcessedTrigger {
@@ -137,16 +172,22 @@ const typeDefs = `#graphql
     detections(limit: Int = 100): [PriceDetectionLog!]!
     debugLogs(limit: Int = 50): [ApiDebugLog!]!
     riskPositions(status: String = "active"): [RiskPosition!]!
+    positions(status: String = "open"): [Position!]!
     processedTriggers: [ProcessedTrigger!]!
     getDetection(id: ID!): PriceDetectionLog
     getTrade(id: ID!): TradeExecutionLog
     getRiskPosition(id: ID!): RiskPosition
+    getPosition(id: ID!): Position
+    
+    # New optional cluster query
+    clusterAnalytics(limit: Int = 20): [PriceDetectionLog!]!
   }
 
   type Mutation {
     logTrade(entry: TradeInput!): Boolean!
     logDetection(entry: DetectionInput!): Boolean!
     logDebug(entry: DebugInput!): Boolean!
+    logPosition(entry: PositionInput!): Boolean!
   }
 
   input TradeInput {
@@ -203,7 +244,14 @@ const typeDefs = `#graphql
     tradeTxHash: String
     riskManagerTxHash: String
     entryPrice: String
-    bayesianAnalysis: String  
+    bayesianAnalysis: String
+    currentPrice: Float!
+    positionAction: String
+    
+    # Optional cluster fields for backward compatibility
+    clusterSize: Int
+    clusterVolatility: Float
+    clusterSpikes: [Float]
   }
 
   input DebugInput {
@@ -213,6 +261,25 @@ const typeDefs = `#graphql
     rawResponse: String
     parsedDecision: String
     error: String
+  }
+  
+  input PositionInput {
+    id: ID!
+    pairId: Int!
+    symbol: String!
+    openedAt: String
+    closedAt: String
+    openPrice: Float!
+    closePrice: Float
+    direction: String!
+    amount: Float!
+    stopLoss: Float!
+    takeProfit: Float!
+    status: String!
+    pnl: Float
+    closeReason: String
+    openDetectionId: String
+    closeDetectionId: String
   }
 `;
 
@@ -236,6 +303,15 @@ const resolvers = {
         take: limit
       });
     },
+    
+    clusterAnalytics: async (_: any, { limit }: { limit: number }) => {
+      const repo = AppDataSource.getRepository(PriceDetectionLog);
+      return repo.find({
+        where: { clusterSize: 3 }, // Only meaningful clusters
+        order: { createdAt: "DESC" },
+        take: limit
+      });
+    },
 
     debugLogs: async (_: any, { limit }: { limit: number }) => {
       const repo = AppDataSource.getRepository(ApiDebugLog);
@@ -250,6 +326,14 @@ const resolvers = {
       return repo.find({
         where: { status: status as 'active' | 'closed' | 'liquidated' },
         order: { createdAt: "DESC" }
+      });
+    },
+    
+    positions: async (_: any, { status }: { status: string }) => {
+      const repo = AppDataSource.getRepository(Position);
+      return repo.find({
+        where: { status: status as 'open' | 'closed' | 'liquidated' },
+        order: { openedAt: "DESC" }
       });
     },
 
@@ -270,6 +354,11 @@ const resolvers = {
 
     getRiskPosition: async (_: any, { id }: { id: string }) => {
       const repo = AppDataSource.getRepository(RiskPosition);
+      return repo.findOneBy({ id });
+    },
+    
+    getPosition: async (_: any, { id }: { id: string }) => {
+      const repo = AppDataSource.getRepository(Position);
       return repo.findOneBy({ id });
     }
   },
@@ -306,22 +395,24 @@ const resolvers = {
         }
       }
 
-      // Convert stopLoss and takeProfit to numbers
-      const stopLoss = typeof entry.stopLoss === 'string' ? 
-        parseFloat(entry.stopLoss) : entry.stopLoss;
-      const takeProfit = typeof entry.takeProfit === 'string' ? 
-        parseFloat(entry.takeProfit) : entry.takeProfit;
-
       Object.assign(log, {
         type: "price-detections",
         createdAt: new Date().toISOString(),
         decisionLength: entry.decision?.length || 0,
         bayesianAnalysis,
         regime: entry.regime || 'transitioning',
-        stopLoss,
-        takeProfit,
+        
+        // Backward-compatible cluster fields
+        clusterSize: entry.clusterSize || null,
+        clusterVolatility: entry.clusterVolatility || null,
+        clusterSpikes: entry.clusterSpikes || [],
+        
         ...entry
       });
+
+      // Ensure critical fields are set
+      if (entry.currentPrice) log.currentPrice = entry.currentPrice;
+      if (entry.positionAction) log.positionAction = entry.positionAction;
 
       await repo.save(log);
       return true;
@@ -337,6 +428,19 @@ const resolvers = {
       });
 
       await repo.save(log);
+      return true;
+    },
+    
+    logPosition: async (_: any, { entry }: any) => {
+      const repo = AppDataSource.getRepository(Position);
+      const position = new Position();
+
+      Object.assign(position, {
+        ...entry,
+        openedAt: entry.openedAt || new Date().toISOString()
+      });
+
+      await repo.save(position);
       return true;
     }
   }
@@ -354,13 +458,14 @@ const httpServer = http.createServer(app);
 app.get('/', (_, res) => {
   res.json({
     service: 'Trading System Gateway',
-    version: '3.1',
+    version: '4.0',
     routes: ['/graphql', '/health'],
     entities: [
       'PriceDetectionLog',
       'TradeExecutionLog',
       'ApiDebugLog',
       'RiskPosition',
+      'Position',
       'ProcessedTrigger'
     ]
   });
@@ -369,18 +474,18 @@ app.get('/', (_, res) => {
 // Health check endpoint
 app.get('/health', async (_, res) => {
   let dbStatus = "disconnected";
-  let riskPositionCount = 0;
-  let triggerCount = 0;
+  let positionCount = 0;
+  let detectionCount = 0;
 
   try {
     if (AppDataSource.isInitialized) {
       dbStatus = "connected";
 
-      const riskRepo = AppDataSource.getRepository(RiskPosition);
-      const triggerRepo = AppDataSource.getRepository(ProcessedTrigger);
+      const positionRepo = AppDataSource.getRepository(Position);
+      const detectionRepo = AppDataSource.getRepository(PriceDetectionLog);
 
-      riskPositionCount = await riskRepo.count();
-      triggerCount = await triggerRepo.count();
+      positionCount = await positionRepo.count();
+      detectionCount = await detectionRepo.count();
     }
   } catch (e) {
     dbStatus = "error";
@@ -394,8 +499,8 @@ app.get('/health', async (_, res) => {
     services: ['graphql-gateway', 'database'],
     database: dbStatus,
     entityCounts: {
-      riskPositions: riskPositionCount,
-      processedTriggers: triggerCount
+      positions: positionCount,
+      detections: detectionCount
     },
     uptime: process.uptime(),
     timestamp: new Date().toISOString()
@@ -433,6 +538,7 @@ async function startServer() {
     const repos = {
       detections: AppDataSource.getRepository(PriceDetectionLog),
       trades: AppDataSource.getRepository(TradeExecutionLog),
+      positions: AppDataSource.getRepository(Position),
       debugLogs: AppDataSource.getRepository(ApiDebugLog),
       riskPositions: AppDataSource.getRepository(RiskPosition),
       processedTriggers: AppDataSource.getRepository(ProcessedTrigger)
@@ -477,11 +583,8 @@ async function startServer() {
   // Enhanced positions endpoint
   app.get('/positions', async (_, res) => {
     try {
-      const positions = await AppDataSource.getRepository(RiskPosition).find();
-      res.json(positions.map(p => ({
-        ...p,
-        metadata: p.metadata ? JSON.parse(p.metadata) : {}
-      })));
+      const positions = await AppDataSource.getRepository(Position).find();
+      res.json(positions);
     } catch (error) {
       res.status(500).json({ error: 'Database query failed' });
     }

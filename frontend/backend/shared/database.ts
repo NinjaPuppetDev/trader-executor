@@ -9,7 +9,7 @@ import {
 
 export const AppDataSource = new DataSource({
     type: "sqlite",
-    database: "data/trigger-system.db",
+    database: "data/trading-system.db",
     entities: [
         PriceDetectionLog,
         TradeExecutionLog,

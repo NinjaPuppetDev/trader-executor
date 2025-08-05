@@ -66,5 +66,3 @@ cd frontend && npx ts-node --project tsconfig.backend.json backend/ethGasAnalyze
 # -- Development Tools --
 
 make deploy-frontend
-
-

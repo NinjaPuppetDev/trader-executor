@@ -1,14 +1,67 @@
 type LogStatus = "pending" | "completed" | "failed" | "executed" | "skipped";
 type LogSource = "price-detections" | "trade-execution";
-export type MarketRegime = 'trending' | 'volatile' | 'consolidating' | 'transitioning';
-
-
+export type MarketRegime = 'uptrend' | 'downtrend' | 'consolidating' | 'exhaustion' | 'transitioning' | 'trending';
 
 interface BaseLogEntry {
     id: string;
     createdAt: string;
     status: LogStatus;
     error?: string;
+}
+
+export interface OHLC {
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+    timestamp: number;
+    averageVolume?: number;
+    buyVolume?: number;  // Added: Aggressor buy volume
+    sellVolume?: number; // Added: Aggressor sell volume
+}
+
+export interface OrderBookSnapshot {
+  bids: [number, number][]; // [price, quantity]
+  asks: [number, number][];
+  timestamp: number;
+}
+
+export interface TradeFlowMetrics {
+  buyVolume: number;  // Cumulative buy volume
+  sellVolume: number; // Cumulative sell volume
+  delta: number;      // Net volume delta (buyVolume - sellVolume)
+}
+
+export interface BayesianRegressionResult {
+  predictedPrice: number;
+  confidenceInterval: [number, number];
+  stopLoss: number;
+  takeProfit: number;
+  trendDirection: 'bullish' | 'bearish' | 'neutral';
+  volatility: number;
+  variance: number;
+  probability: number;
+  zScore: number;
+  regime: MarketRegime;
+  indicators: {
+    support: number;
+    resistance: number;
+    vwma: number;
+    obv: number;
+    rsi: number;
+    volumeRsi: number;
+    vwap: number;
+    volumeDelta?: number;           // Added: Net buy/sell volume difference
+    bidAskImbalance?: number;       // Added: Order book imbalance
+    liquidityClusters?: {           // Added: Key liquidity levels
+      price: number;
+      bidLiquidity: number;
+      askLiquidity: number;
+    }[];
+    arimaForecast: number;          // Added: ARIMA forecast value
+    arimaConfidence: number;        // Added: ARIMA model confidence
+  };
 }
 
 export interface PriceDetectionLogEntry extends BaseLogEntry {
@@ -33,6 +86,16 @@ export interface PriceDetectionLogEntry extends BaseLogEntry {
     actualAmountOut?: string;
     gasUsed?: string;
     riskPositionId?: string;
+    currentPrice: number;
+    positionAction?: 'open' | 'close' | 'adjust' | 'hold' | string;
+    positionId?: string | null;
+    bayesianAnalysis?: BayesianRegressionResult | null;
+    regime: MarketRegime;
+    orderFlowSignals?: {  // Added: Order flow signals
+      absorption: boolean;
+      stopRun: boolean;
+      liquidityGrab: boolean;
+    };
 }
 
 export interface TradeExecutionLog extends BaseLogEntry {
@@ -45,25 +108,30 @@ export interface TradeExecutionLog extends BaseLogEntry {
     amount: string;
     tokenInDecimals: number;
     tokenOutDecimals: number;
-    pairId: number; // Added pair ID
-
-    // New risk management parameters
+    pairId: number;
     stopLoss?: number;
     takeProfit?: number;
-
     amountIn?: string | null;
     minAmountOut?: string | null;
     actualAmountOut?: string | null;
     txHash?: string | null;
     gasUsed?: string | null;
     timestamp?: string;
+    positionId?: string | null;
+    entryPrice?: string | null;
+    liquidityClusters?: {  // Added: Liquidity levels used for execution
+      price: number;
+      bidLiquidity: number;
+      askLiquidity: number;
+    }[];
 }
 
 export interface Position {
-    id: string;             // Same as positionId from TradeExecutor
-    entryPrice: string;     // In 18 decimals format
-    isLong: boolean;        // Position direction
-    amount: string;         // Position size
+    id: string;
+    entryPrice: string;
+    isLong: boolean;
+    amount: string;
+    tradeFlow?: TradeFlowMetrics; // Added: Trade flow at position entry
 }
 
 export type LogEntry = PriceDetectionLogEntry | TradeExecutionLog;
@@ -77,17 +145,22 @@ export function isTradeExecutionLog(log: LogEntry): log is TradeExecutionLog {
     return log.type === "trade-execution";
 }
 
-// Enhanced TradingDecision with risk parameters
 export interface TradingDecision {
+    positionAction: 'open' | 'close' | 'hold' | 'adjust';
     decision: 'buy' | 'sell' | 'hold';
     tokenIn: string;
     tokenOut: string;
     amount: string;
     slippage: number;
     reasoning: string;
-    confidence: 'high' | 'medium' | 'low' | string
-    stopLoss: number;
-    takeProfit: number;
+    confidence: 'high' | 'medium' | 'low' | string;
+    stopLoss?: number;
+    takeProfit?: number;
+    positionId?: string;
+    orderFlowSignals?: {  // Added: Signals influencing decision
+      absorption: boolean;
+      stopRun: boolean;
+    };
 }
 
 export interface MarketContext {
@@ -97,8 +170,6 @@ export interface MarketContext {
     obv_trend?: string;
     rl_insights?: any[];
     timestamp: string;
-
-    // Enhanced price event with volatility
     price_event?: {
         type: string;
         direction: string;
@@ -106,9 +177,8 @@ export interface MarketContext {
         current_price: number;
         previous_price: number;
         volatility_level: 'low' | 'medium' | 'high' | 'extreme';
+        volumeDelta?: number; // Added: Net volume change
     };
-
-    // Added token metadata
     token_metadata?: {
         stable: {
             address: string;
@@ -121,82 +191,81 @@ export interface MarketContext {
             decimals: number;
         };
     };
+    orderBookImbalance?: number; // Added: Current bid-ask imbalance
 }
 
-// New type for position risk parameters
 export interface RiskParameters {
     stopLoss: number;
     takeProfit: number;
     positionId?: string;
+    liquidityCluster?: {  // Added: Liquidity level used for stop
+      price: number;
+      bidLiquidity: number;
+      askLiquidity: number;
+    };
 }
 
-// New type for position details
 export interface PositionDetails {
-    id: string;             // Position ID
+    id: string;
     entryPrice: number;
     currentPrice: number;
     amount: number;
     direction: 'long' | 'short';
     status: 'open' | 'closed' | 'liquidated';
-    stopLoss: number;       // In basis points (500 = 5%)
-    takeProfit: number;     // In basis points (1000 = 10%)
+    stopLoss: number;
+    takeProfit: number;
     openedAt: string;
     closedAt?: string;
+    entryTradeFlow?: TradeFlowMetrics; // Added: Trade flow at entry
 }
 
 export interface RiskPosition {
-    id: string;             // Matches TradeExecutor's positionId
+    id: string;
     trader: string;
     isLong: boolean;
     amount: string;
-    entryPrice: string;     // In 18 decimals
-    stopLoss: number;       // Basis points (500 = 5%)
-    takeProfit: number;     // Basis points (1000 = 10%)
+    entryPrice: string;
+    stopLoss: number;
+    takeProfit: number;
     createdAt: string;
     lastUpdated: string;
     status: 'active' | 'closed' | 'liquidated';
     metadata?: string;
-}
-
-export interface BayesianRegressionResult {
-    predictedPrice: number;
-    confidenceInterval: [number, number];
-    stopLoss: number;
-    takeProfit: number;
-    trendDirection: 'bullish' | 'bearish' | 'neutral';
-    volatility: number;
-    variance: number;
-    probability: number;
-    zScore: number;
-    regime: MarketRegime;
+    entryVolumeDelta?: number; // Added: Volume delta at position entry
 }
 
 export interface MarketDataState {
-    prices: number[];
-    volumes: number[];
+  timestamp: number;
+  symbol: string;
+  currentPrice: number | null;
+  ohlcHistory: OHLC[];
+  currentCandle: OHLC | null;
+  candleDuration: number;
+  dataDuration: number;
+  additional?: {
+    high?: number;
+    low?: number;
+  };
+  regime?: MarketRegime;
+  averageVolume?: number;
+  signal?: {
+    shouldTrigger: boolean;
+    recommendedAction: string;
+    confidence: number;
+    signals: string[];
+    keyLevels: number[];
     currentPrice: number;
-    regime: MarketRegime;
-    averageVolume: number;
-    timestamp: number;
     symbol: string;
-    additional: {
-        open?: number;
-        high: number;
-        low: number;
-        close?: number;
-        isBuyerMaker?: boolean;
-    };
-    signal?: {
-        shouldTrigger: boolean;
-        recommendedAction: string;
-        confidence: number;
-        signals: string[];
-        keyLevels: number[];
-        currentPrice: number;
-        symbol: string;
-        trend: string;
-    };
-    priceChangePercent?: number;
-    priceChange24h?: number;
-    bayesianAnalysis?: BayesianRegressionResult;
+    trend: string;
+  };
+  priceChangePercent?: number;
+  priceChange24h?: number;
+  bayesianAnalysis?: BayesianRegressionResult;
+  orderBook?: OrderBookSnapshot;  // Added: Current order book state
+  tradeFlow?: TradeFlowMetrics;   // Added: Current trade flow metrics
+  liquidityClusters?: {           // Added: Key liquidity levels
+    price: number;
+    bidLiquidity: number;
+    askLiquidity: number;
+  }[];
 }

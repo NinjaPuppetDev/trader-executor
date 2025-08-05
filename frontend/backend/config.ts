@@ -12,7 +12,7 @@ export const CONFIG = {
     stableFeedAddress: '0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9',
     exchangeAddress: '0x5FC8d32690cc91D4c39d9d3abcBD16989F875707',
     privateKeyKeeper: '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
-    priceUpdateInterval: 15 * 60 * 1000,
+    priceUpdateInterval: 5 * 60 * 1000,
     defaultAmount: '0.03',
     slippagePercent: 1,
     poolFee: 3000,

@@ -42,6 +42,10 @@ export const CONFIG = {
     confidenceThreshold: 60,    // Minimum confidence to trigger
     replayInterval: 100,
 
+    candleInterval: 300000, // 5 minutes
+    candleBufferSize: 100, // ~8 hours of data
+    ohlcMinDataPoints: 12,
+
     historicalReplaySpeed: 5,
 
 };
